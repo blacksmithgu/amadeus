@@ -30,6 +30,6 @@ CREATE TABLE songs_sources (
     -- What type of connection is this? ('author', 'insert-in', 'boss-music', etc)
     type TEXT NOT NULL,
     -- TODO: Must explicitly enable foreign keys in SQLite via https://www.sqlite.org/foreignkeys.html.
-    FOREIGN KEY(song_id) REFERENCES songs(id),
-    FOREIGN KEY(source_id) REFERENCES sources(id)
+    FOREIGN KEY(song_id) REFERENCES songs(id) ON DELETE CASCADE,
+    FOREIGN KEY(source_id) REFERENCES sources(id) ON DELETE CASCADE
 );
