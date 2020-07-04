@@ -100,23 +100,14 @@ fun Application.module(testing: Boolean = true) {
 
     // Main routing table.
     routing {
+        // A corny 'Hello World' until we get some more meaningful things.
         get("/") {
             call.respondText("HELLO WORLD!", contentType = ContentType.Text.Plain)
         }
 
-        // Static feature. Try to access `/static/ktor_logo.svg`
-        static("/static") {
+        // Directly serve anything in resources/static to the root directory if previous dynamic paths fail.
+        static {
             resources("static")
-        }
-
-        webSocket("/myws/echo") {
-            send(Frame.Text("Hi from server"))
-            while (true) {
-                val frame = incoming.receive()
-                if (frame is Frame.Text) {
-                    send(Frame.Text("Client said: " + frame.readText()))
-                }
-            }
         }
     }
 }

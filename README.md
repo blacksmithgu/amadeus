@@ -31,6 +31,10 @@ And this to test:
 
 **Server-side**: 
 
+* [ ] Music storage medium (Sqlite + Filesystem)
+    * [ ] Music metadata: upload origin (youtube + link, file upload + person, etc), upload time, type (game vs anime, etc), author, series ('dark souls 1', 'dark souls')
+    * [ ] Custom music collections that are auditable by users
+    * [ ] Filter games by steam library
 * [ ] Simple file-upload API for providing music
 * [ ] Simple youtube-fetch API for obtaining music from youtube via youtube-dl
     * [ ] Verifier for checking youtube-dl and python3 are both available
