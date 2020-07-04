@@ -1,0 +1,29 @@
+# Build tool junk
+.gradle
+.idea
+
+# Node artifacts
+node_modules/
+
+# Build outputs
+out
+build
+bin
+dist
+
+# IntelliJ files
+*.iml
+*.ipr
+*.iws
+
+# Editor junk
+.vscode
+*.swp
+
+# Typical junk that finds it's way into repos
+.DS_Store
+desktop.ini
+
+# Other log junk
+*.log
+*.stacktrace
