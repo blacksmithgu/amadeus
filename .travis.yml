@@ -1,7 +1,9 @@
+language: java
+os: linux
+dist: xenial
 jobs:
   include:
     - before_install: cd frontend 
       language: node_js
-      node_js:
-        - node
+      node_js: node
     - language: java
