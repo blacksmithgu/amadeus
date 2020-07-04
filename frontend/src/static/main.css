@@ -33,6 +33,7 @@ td {
     width: 400px;
     height: 300px;
     border: 2px black;
+    padding-bottom: 5px;
 }
 
 #canvas {
