@@ -5,11 +5,16 @@ buildscript {
     
     dependencies {
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+        classpath "org.jooq:jooq-codegen:3.13.2"
     }
 }
 
-apply plugin: 'kotlin'
-apply plugin: 'application'
+plugins {
+    id 'java'
+    id 'org.jetbrains.kotlin.jvm' version "$kotlin_version"
+    id 'application'
+    id 'nu.studer.jooq' version '4.2'
+}
 
 group 'io.meltec.amadeus'
 version '0.0.1'
@@ -30,6 +35,9 @@ repositories {
 }
 
 dependencies {
+    implementation "org.jooq:jooq:3.13.2"
+    jooqRuntime 'org.jooq:jooq-meta-extensions:3.13.2'
+
     implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlin_version"
     implementation "io.ktor:ktor-server-netty:$ktor_version"
     implementation "ch.qos.logback:logback-classic:$logback_version"
@@ -44,4 +52,45 @@ dependencies {
     implementation "io.ktor:ktor-auth-jwt:$ktor_version"
     implementation "io.ktor:ktor-jackson:$ktor_version"
     testImplementation "io.ktor:ktor-server-tests:$ktor_version"
+}
+
+// TODO: It would be good if this jooq job only runs when the schema changes instead of always - schema generation takes
+// several seconds!
+jooq {
+    version = '3.13.2'
+    edition = 'OSS'
+    generateSchemaSourceOnCompilation = true
+
+    schemaGen(sourceSets.main) {
+        generator {
+            database {
+                name = "org.jooq.meta.extensions.ddl.DDLDatabase"
+                properties {
+                    property {
+                        key = 'scripts'
+                        value = 'resources/schema.sql'
+                    }
+                    property {
+                        key = 'sort'
+                        value = 'semantic'
+                    }
+                    property {
+                        key = 'unqualifiedSchema'
+                        value = 'none'
+                    }
+                    property {
+                        key = 'defaultNameCase'
+                        value = 'as_is'
+                    }
+                }
+
+                forcedTypes {
+                    forcedType {
+                        name = "LOCALDATETIME"
+                        includeExpression = "\\w+_time"
+                    }
+                }
+            }
+        }
+    }
 }

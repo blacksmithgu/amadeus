@@ -14,7 +14,6 @@ import io.ktor.http.cio.websocket.*
 import java.time.*
 import com.fasterxml.jackson.databind.*
 import io.ktor.jackson.*
-import io.ktor.util.KtorExperimentalAPI
 
 fun main(args: Array<String>): Unit = io.ktor.server.netty.EngineMain.main(args)
 
