@@ -1,4 +1,5 @@
-# Amadeus 
+# Amadeus [![Build
+Status](https://travis-ci.com/blacksmithgu/amadeus.svg?branch=master)](https://travis-ci.com/blacksmithgu/amadeus)
 
 A somewhat silly music guessing game; targeted mostly towards video games, but supports generic file uploads as well as
 music sourced from Youtube (via youtube-dl).
