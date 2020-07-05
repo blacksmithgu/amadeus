@@ -1,18 +1,26 @@
 package io.meltec.amadeus
 
+import io.ktor.html.Placeholder
+import io.ktor.html.Template
+import io.ktor.html.insert
 import kotlinx.html.*
 
-fun HTML.defaultTemplate(content: BODY.() -> Unit) {
-    head {
-        title = "Amadeus"
-        meta(name = "description", content = "Amadeus - Youtube Music Guessing Game")
-        styleLink("main.css")
+class DefaultTemplate : Template<HTML> {
+    val content = Placeholder<HtmlBlockTag>()
+    override fun HTML.apply() {
+        head {
+            title("Amadeus")
+            meta(name = "description", content = "Amadeus - Youtube Music Guessing Game")
+            styleLink("main.css")
+        }
+        body {
+            insert(content)
+        }
     }
-    body { content() }
 }
 
-fun HTML.registrationPage() {
-    defaultTemplate {
+fun DefaultTemplate.registrationPage() {
+    content {
         classes = setOf("text-center")
         id = "registration"
         form(classes = "form-register") {

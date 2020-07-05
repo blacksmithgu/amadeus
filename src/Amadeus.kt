@@ -5,7 +5,7 @@ import io.ktor.application.ApplicationCallPipeline
 import io.ktor.application.call
 import io.ktor.application.install
 import io.ktor.features.*
-import io.ktor.html.respondHtml
+import io.ktor.html.respondHtmlTemplate
 import io.ktor.http.CacheControl
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
@@ -134,7 +134,7 @@ class Amadeus(val database: Database) {
         routing {
             route("/") {
                 get {
-                    call.respondHtml {
+                    call.respondHtmlTemplate(DefaultTemplate()) {
                         registrationPage()
                     }
                 }
