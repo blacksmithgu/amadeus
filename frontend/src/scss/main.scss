@@ -1,3 +1,9 @@
+@import '../../node_modules/bootstrap/scss/bootstrap.scss';
+
+html {
+    height: 100%;
+}
+
 body {
     overflow: hidden;
     width: 100%;
@@ -55,4 +61,33 @@ td {
 #roomlist th {
     background-color: black;
     color: white;
+}
+
+#registration {
+    display: flex;
+    align-items: center;
+    padding {
+        top: 40px;
+        bottom: 40px;
+    }
+    background-color: $gray-300
+}
+
+.form-register {
+    width: 100%;
+    max-width: 330px;
+    padding: 15px;
+    margin: auto;
+
+    .form-control {
+        position: relative;
+        box-sizing: border-box;
+        height: auto;
+        padding: 10px;
+        font-size: 16px;
+
+        &:focus {
+            z-index: 2;
+        }
+    }
 }

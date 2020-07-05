@@ -5,6 +5,7 @@ import io.ktor.application.Application
 import io.ktor.application.call
 import io.ktor.application.install
 import io.ktor.features.*
+import io.ktor.html.respondHtml
 import io.ktor.http.CacheControl
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
@@ -16,7 +17,6 @@ import io.ktor.http.content.resources
 import io.ktor.http.content.static
 import io.ktor.jackson.jackson
 import io.ktor.request.path
-import io.ktor.response.respondText
 import io.ktor.routing.get
 import io.ktor.routing.routing
 import io.ktor.util.date.GMTDate
@@ -73,7 +73,10 @@ class Amadeus(val database: Database) {
         install(CachingHeaders) {
             options { outgoingContent ->
                 when (outgoingContent.contentType?.withoutParameters()) {
-                    ContentType.Text.CSS -> CachingOptions(CacheControl.MaxAge(maxAgeSeconds = 24 * 60 * 60), expires = null as? GMTDate?)
+                    ContentType.Text.CSS -> CachingOptions(
+                        CacheControl.MaxAge(maxAgeSeconds = 24 * 60 * 60),
+                        expires = null as? GMTDate?
+                    )
                     else -> null
                 }
             }
@@ -113,9 +116,10 @@ class Amadeus(val database: Database) {
 
         // Main routing table.
         routing {
-            // A corny 'Hello World' until we get some more meaningful things.
             get("/") {
-                call.respondText("HELLO WORLD!", contentType = ContentType.Text.Plain)
+                call.respondHtml {
+                    registrationPage()
+                }
             }
 
             // Directly serve anything in resources/static to the root directory if previous dynamic paths fail.
