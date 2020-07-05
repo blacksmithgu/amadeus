@@ -2,6 +2,7 @@ package io.meltec.amadeus
 
 import com.fasterxml.jackson.databind.SerializationFeature
 import io.ktor.application.Application
+import io.ktor.application.ApplicationCallPipeline
 import io.ktor.application.call
 import io.ktor.application.install
 import io.ktor.features.*
@@ -17,12 +18,21 @@ import io.ktor.http.content.resources
 import io.ktor.http.content.static
 import io.ktor.jackson.jackson
 import io.ktor.request.path
+import io.ktor.request.receiveParameters
+import io.ktor.response.respond
+import io.ktor.response.respondRedirect
+import io.ktor.response.respondText
 import io.ktor.routing.get
+import io.ktor.routing.post
+import io.ktor.routing.route
 import io.ktor.routing.routing
+import io.ktor.sessions.*
 import io.ktor.util.date.GMTDate
+import io.ktor.util.generateNonce
 import io.ktor.websocket.WebSockets
 import org.slf4j.event.Level
 import java.time.Duration
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Central application information and metadata.
@@ -114,13 +124,49 @@ class Amadeus(val database: Database) {
         // Status-pages which show up on thrown exception. Nothing for now; you can add per-exception-type handling.
         install(StatusPages)
 
+        // Enable the use of sessions to keep information between requests of the browser.
+        install(Sessions) {
+            cookie<PlayerSession>("SESSION")
+        }
+
+        // Create a session in each request if no session exists
+        intercept(ApplicationCallPipeline.Features) {
+            call.sessions.getOrSet { PlayerSession(generateNonce()) }
+        }
+
         // Main routing table.
         routing {
-            get("/") {
-                call.respondHtml {
-                    registrationPage()
+            route("/") {
+                get {
+                    call.respondHtml {
+                        registrationPage()
+                    }
+                }
+                route("register") {
+                    post {
+                        call.sessions.get<PlayerSession>()?.let { session ->
+                            call.receiveParameters()["displayName"]?.let {
+                                playerNames[session] = it
+                                call.respondRedirect("/game")
+                                return@post
+                            }
+                        }
+                        call.respondRedirect("/")
+                    }
+                }
+                route("game") {
+                    get {
+                        call.sessions.get<PlayerSession>()?.let { session ->
+                            playerNames[session]?.let {
+                                call.respondText(it)
+                                return@get
+                            }
+                        }
+                        call.respondRedirect("/")
+                    }
                 }
             }
+
 
             // Directly serve anything in resources/static to the root directory if previous dynamic paths fail.
             static {
@@ -128,4 +174,11 @@ class Amadeus(val database: Database) {
             }
         }
     }
+
+    private val playerNames = ConcurrentHashMap<PlayerSession, String>()
 }
+
+/**
+ * A player session identified by a unique nonce ID.
+ */
+inline class PlayerSession(val id: String)

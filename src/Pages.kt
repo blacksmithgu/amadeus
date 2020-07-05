@@ -16,11 +16,14 @@ fun HTML.registrationPage() {
         classes = setOf("text-center")
         id = "registration"
         form(classes = "form-register") {
+            action = "/register"
+            method = FormMethod.post
             h1(classes = "mb-3 font-weight-normal") { +"Amadeus" }
             input(classes = "form-control mb-3") {
                 type = InputType.text
-                id = "inputName"
-                placeholder = "Name"
+                id = "inputDisplayName"
+                name = "displayName"
+                placeholder = "Display name"
                 required = true
                 autoFocus = true
             }
