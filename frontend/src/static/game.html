@@ -12,6 +12,7 @@
         <link rel="stylesheet" href="main.css">
     </head>
     <body>
+        <button onclick="addPlayer()">Test Player Add</button>
         <div id="centerinfo" class="centerelement">
             <div id="videocontainer" class="embedded">
                 <embed type="video/webm" width="400" height="300">
@@ -23,8 +24,8 @@
             </div>
         </div>
 
-        <div id="scores" class="leftelement">
-            <table>
+        <div id="scorecontainer" class="leftelement">
+            <table id="scoreboard">
                 <tr>
                     <th>Player</th>
                     <th>Score</th>
@@ -35,6 +36,6 @@
         <div id="playercontainer" class="bottomelement">
             <p>Players go here</p>
         </div>   
-        <script src="game.js"></script>
+        <script src="main.js"></script>
     </body>
 </html>
