@@ -44,8 +44,15 @@ td {
     padding-bottom: 5px;
 }
 
-#canvas {
-    overflow: hidden;
+#roomlist {
     width: 100%;
-    height: 100%;
+}
+
+#roomlist tr:nth-child(even){background-color: #f2f2f2;}
+
+#roomlist tr:hover {background-color: #ddd;}
+
+#roomlist th {
+    background-color: black;
+    color: white;
 }
