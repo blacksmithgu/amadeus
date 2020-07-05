@@ -19,7 +19,6 @@ import io.ktor.http.content.static
 import io.ktor.jackson.jackson
 import io.ktor.request.path
 import io.ktor.request.receiveParameters
-import io.ktor.response.respond
 import io.ktor.response.respondRedirect
 import io.ktor.response.respondText
 import io.ktor.routing.get
@@ -166,7 +165,6 @@ class Amadeus(val database: Database) {
                     }
                 }
             }
-
 
             // Directly serve anything in resources/static to the root directory if previous dynamic paths fail.
             static {
