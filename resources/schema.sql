@@ -39,5 +39,7 @@ CREATE TABLE songs_sources (
 );
 
 -- SQLite specific stuff. Current schema version and '0xA3ADE05' (vaguely amadeus) application ID.
+-- [jooq ignore start]
 PRAGMA user_version = 1;
 PRAGMA application_id = 171630085;
+-- [jooq ignore stop]

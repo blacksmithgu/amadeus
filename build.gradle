@@ -87,6 +87,18 @@ jooq {
                         key = 'defaultNameCase'
                         value = 'as_is'
                     }
+                    property {
+                        key = 'parseIgnoreComments'
+                        value = 'true'
+                    }
+                    property {
+                        key = 'parseIgnoreCommentStart'
+                        value = '[jooq ignore start]'
+                    }
+                    property {
+                        key = 'parseIgnoreCommentStop'
+                        value = '[jooq ignore stop]'
+                    }
                 }
 
                 forcedTypes {
