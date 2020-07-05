@@ -1,5 +1,5 @@
 {
-  "name": "delve",
+  "name": "amadeus-frontend",
   "version": "0.0.1",
   "description": "The frontend for the Amadeus quiz game.",
   "main": "./dist/main.js",

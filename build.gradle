@@ -122,6 +122,8 @@ compileKotlin {
     }
 }
 
+/** Frontend build automation. */
+
 node {
     nodeModulesDir = file("${project.projectDir}/frontend")
 }
