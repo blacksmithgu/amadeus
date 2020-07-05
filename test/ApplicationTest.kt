@@ -22,11 +22,20 @@ import com.fasterxml.jackson.databind.*
 import io.ktor.jackson.*
 import kotlin.test.*
 import io.ktor.server.testing.*
+import org.sqlite.SQLiteConfig
 
 class ApplicationTest {
     @Test
     fun testRoot() {
-        withTestApplication({ module(testing = true) }) {
+        // TODO: Move this to a generic setup block.
+        val database = Database.sqlite("amadeus-test.db", SQLiteConfig().apply {
+            enableRecursiveTriggers(true)
+            enforceForeignKeys(true)
+            setApplicationId(0xA3ADE05) // Vaguely 'Amadeus'
+        })
+        val amadeus = Amadeus(database)
+
+        withTestApplication({ amadeus.configure(this, true) }) {
             handleRequest(HttpMethod.Get, "/").apply {
                 assertEquals(HttpStatusCode.OK, response.status())
                 assertEquals("HELLO WORLD!", response.content)
