@@ -22,7 +22,7 @@ enum class SongOrigin {
 }
 
 /** A song in the system; associated with an arbitrary number of sources. */
-data class Song(val id: Int, val uploadTime: LocalDateTime, val origin: SongOrigin, val data_source: String)
+data class Song(val id: Int, val name: String, val uploadTime: LocalDateTime, val origin: SongOrigin, val data_source: String)
 
 /** A source of songs; can also be seen as a Tag. */
 data class Source(val id: Int, val name: String, val type: String, val referenceLink: String?, val createdTime: LocalDateTime)

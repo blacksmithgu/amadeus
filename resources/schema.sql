@@ -17,6 +17,8 @@ CREATE TABLE sources (
 -- File data is stored on the filesystem, named the same as the ID of the song.
 CREATE TABLE songs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    -- The 'canonical' name of this song; it may have aliases.
+    name TEXT NOT NULL,
     -- When this song was added to the database.
     upload_time TEXT NOT NULL,
     -- How did we get this song? Direct upload (0), youtube (1), etc.
