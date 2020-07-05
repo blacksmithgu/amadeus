@@ -27,3 +27,7 @@ desktop.ini
 # Other log junk
 *.log
 *.stacktrace
+
+# Runtime junk
+amadeus.db
+amadeus-test.db

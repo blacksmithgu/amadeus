@@ -31,7 +31,6 @@ class ApplicationTest {
         val database = Database.sqlite("amadeus-test.db", SQLiteConfig().apply {
             enableRecursiveTriggers(true)
             enforceForeignKeys(true)
-            setApplicationId(0xA3ADE05) // Vaguely 'Amadeus'
         })
         val amadeus = Amadeus(database)
 

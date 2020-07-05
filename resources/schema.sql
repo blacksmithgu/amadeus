@@ -37,3 +37,7 @@ CREATE TABLE songs_sources (
     FOREIGN KEY(song_id) REFERENCES songs(id) ON DELETE CASCADE,
     FOREIGN KEY(source_id) REFERENCES sources(id) ON DELETE CASCADE
 );
+
+-- SQLite specific stuff. Current schema version and '0xA3ADE05' (vaguely amadeus) application ID.
+PRAGMA user_version = 1;
+PRAGMA application_id = 171630085;
