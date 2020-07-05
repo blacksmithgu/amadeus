@@ -5,7 +5,7 @@ buildscript {
     
     dependencies {
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
-        classpath "org.jooq:jooq-codegen:3.13.2"
+        classpath "org.jooq:jooq-codegen:$jooq_version"
     }
 }
 
@@ -21,7 +21,8 @@ version '0.0.1'
 mainClassName = "io.ktor.server.netty.EngineMain"
 
 sourceSets {
-    main.kotlin.srcDirs = main.java.srcDirs = ['src']
+    main.kotlin.srcDirs = ['src', 'build/generated-src/jooq/primary']
+    main.java.srcDirs = []
     test.kotlin.srcDirs = test.java.srcDirs = ['test']
     main.resources.srcDirs = ['resources']
     test.resources.srcDirs = ['testresources']
@@ -36,8 +37,8 @@ repositories {
 
 dependencies {
     // JOOQ dependencies (both codegen & runtime)
-    implementation "org.jooq:jooq:3.13.2"
-    jooqRuntime 'org.jooq:jooq-meta-extensions:3.13.2'
+    implementation "org.jooq:jooq:$jooq_version"
+    jooqRuntime "org.jooq:jooq-meta-extensions:$jooq_version"
 
     // sqlite JDBC
     implementation 'org.xerial:sqlite-jdbc:3.32.3'
@@ -55,18 +56,17 @@ dependencies {
     implementation "io.ktor:ktor-websockets:$ktor_version"
     implementation "io.ktor:ktor-auth:$ktor_version"
     implementation "io.ktor:ktor-auth-jwt:$ktor_version"
-    implementation "io.ktor:ktor-jackson:$ktor_version"
+    implementation "io.ktor:ktor-serialization:$ktor_version"
     testImplementation "io.ktor:ktor-server-tests:$ktor_version"
 }
 
-// TODO: It would be good if this jooq job only runs when the schema changes instead of always - schema generation takes
-// several seconds!
 jooq {
-    version = '3.13.2'
+    version = "$jooq_version"
     edition = 'OSS'
     generateSchemaSourceOnCompilation = true
 
-    schemaGen(sourceSets.main) {
+    primary(sourceSets.main) {
+        logging = "WARN"
         generator {
             database {
                 name = "org.jooq.meta.extensions.ddl.DDLDatabase"
@@ -111,6 +111,9 @@ jooq {
         }
     }
 }
+
+// Need to explicitly add the jooq generated schema files to the kotlin path.
+compileKotlin.dependsOn generatePrimaryJooqSchemaSource
 
 compileKotlin {
     kotlinOptions {

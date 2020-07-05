@@ -1,6 +1,5 @@
 package io.meltec.amadeus
 
-import com.fasterxml.jackson.databind.SerializationFeature
 import io.ktor.application.Application
 import io.ktor.application.ApplicationCallPipeline
 import io.ktor.application.call
@@ -16,7 +15,6 @@ import io.ktor.http.cio.websocket.timeout
 import io.ktor.http.content.CachingOptions
 import io.ktor.http.content.resources
 import io.ktor.http.content.static
-import io.ktor.jackson.jackson
 import io.ktor.request.path
 import io.ktor.request.receiveParameters
 import io.ktor.response.respondRedirect
@@ -25,6 +23,7 @@ import io.ktor.routing.get
 import io.ktor.routing.post
 import io.ktor.routing.route
 import io.ktor.routing.routing
+import io.ktor.serialization.json
 import io.ktor.sessions.*
 import io.ktor.util.date.GMTDate
 import io.ktor.util.generateNonce
@@ -113,11 +112,9 @@ class Amadeus(val database: Database) {
             masking = false
         }
 
-        // Jackson-based data serialization; could also use gson or something, but Jackson is quite fast and I've used it before.
+        // kotlinx.serialization-based json serialization.
         install(ContentNegotiation) {
-            jackson {
-                enable(SerializationFeature.INDENT_OUTPUT)
-            }
+            json()
         }
 
         // Status-pages which show up on thrown exception. Nothing for now; you can add per-exception-type handling.

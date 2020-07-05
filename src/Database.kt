@@ -1,7 +1,11 @@
 package io.meltec.amadeus
 
 import org.jooq.DSLContext
+import org.jooq.RecordMapper
 import org.jooq.SQLDialect
+import org.jooq.generated.tables.records.SongsRecord
+import org.jooq.generated.tables.records.SongsSourcesRecord
+import org.jooq.generated.tables.records.SourcesRecord
 import org.jooq.impl.DSL
 import org.sqlite.SQLiteConfig
 import java.sql.Connection
@@ -63,3 +67,24 @@ class Database {
     }
 }
 
+/** Maps SongRecords to Song objects. */
+val SONG_MAPPER: RecordMapper<SongsRecord, Song> = RecordMapper { record: SongsRecord ->
+    Song(record.id, record.name, record.uploadTime, SongOrigin.fromId(record.uploadOrigin), record.uploadDataSource)
+}
+
+/** Maps SourceRecords to Source objects. */
+val SOURCE_MAPPER: RecordMapper<SourcesRecord, Source> = RecordMapper { record: SourcesRecord ->
+    Source(record.id, record.name, record.type, record.referenceLink, record.createdTime)
+}
+
+/** Maps SongSourceRecords to SongSource objects. */
+val SONG_SOURCE_MAPPER: RecordMapper<SongsSourcesRecord, SongSource> = RecordMapper {  record: SongsSourcesRecord ->
+    SongSource(record.songId, record.sourceId, record.type)
+}
+
+/** Map a Song object to a SongRecord. */
+fun Song.asRecord(): SongsRecord = SongsRecord(id, name, uploadTime, origin.ordinal, dataSource)
+/** Map a Source object to a SourceRecord. */
+fun Source.asRecord(): SourcesRecord = SourcesRecord(id, name, type, referenceLink, createdTime)
+/** Map a SongSource object to SongsSourcesRecord. */
+fun SongSource.asRecord(): SongsSourcesRecord = SongsSourcesRecord(songId, sourceId, type)

@@ -11,18 +11,23 @@ enum class SongOrigin {
     /** A direct file upload. */
     DIRECT_UPLOAD,
     /** The song originated from a youtube video. */
-    YOUTUBE;
+    YOUTUBE,
+    /** We have no idea where this song came from. Wierd. */
+    UNKNOWN;
 
     /** Map a song origin ID/ordinal to the actual song origin. */
-    fun fromId(id: Int): SongOrigin? = when(id) {
-        0 -> DIRECT_UPLOAD
-        1 -> YOUTUBE
-        else -> null
+    companion object {
+        @JvmStatic
+        fun fromId(id: Int): SongOrigin = when (id) {
+            0 -> DIRECT_UPLOAD
+            1 -> YOUTUBE
+            else -> UNKNOWN
+        }
     }
 }
 
 /** A song in the system; associated with an arbitrary number of sources. */
-data class Song(val id: Int, val name: String, val uploadTime: LocalDateTime, val origin: SongOrigin, val data_source: String)
+data class Song(val id: Int, val name: String, val uploadTime: LocalDateTime, val origin: SongOrigin, val dataSource: String)
 
 /** A source of songs; can also be seen as a Tag. */
 data class Source(val id: Int, val name: String, val type: String, val referenceLink: String?, val createdTime: LocalDateTime)
