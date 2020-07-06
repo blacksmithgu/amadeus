@@ -28,7 +28,6 @@ class ApplicationTest {
                 }
                 handleRequest(HttpMethod.Get, "/room").run {
                     assertEquals(HttpStatusCode.OK, response.status())
-                    assertTrue { response.content?.contains(expected) ?: false }
                 }
             }
         }
