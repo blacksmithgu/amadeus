@@ -1,9 +1,6 @@
 package io.meltec.amadeus
 
-import io.ktor.application.Application
-import io.ktor.application.ApplicationCallPipeline
-import io.ktor.application.call
-import io.ktor.application.install
+import io.ktor.application.*
 import io.ktor.features.*
 import io.ktor.html.respondHtmlTemplate
 import io.ktor.http.CacheControl
@@ -18,7 +15,6 @@ import io.ktor.http.content.static
 import io.ktor.request.path
 import io.ktor.request.receiveParameters
 import io.ktor.response.respondRedirect
-import io.ktor.response.respondText
 import io.ktor.routing.get
 import io.ktor.routing.post
 import io.ktor.routing.route
@@ -27,6 +23,7 @@ import io.ktor.serialization.json
 import io.ktor.sessions.*
 import io.ktor.util.date.GMTDate
 import io.ktor.util.generateNonce
+import io.ktor.util.pipeline.PipelineContext
 import io.ktor.websocket.WebSockets
 import org.slf4j.event.Level
 import java.time.Duration
@@ -140,21 +137,34 @@ class Amadeus(val database: Database) {
                 }
                 route("register") {
                     post {
-                        call.sessions.get<PlayerSession>()?.let { session ->
+                        ensureSession { session ->
                             call.receiveParameters()["displayName"]?.let {
                                 playerNames[session] = it
-                                call.respondRedirect("/game")
+                                call.respondRedirect("/room")
                                 return@post
                             }
                         }
                         call.respondRedirect("/")
                     }
                 }
-                route("game") {
+                route("room") {
                     get {
-                        call.sessions.get<PlayerSession>()?.let { session ->
+                        ensureSession { session ->
                             playerNames[session]?.let {
-                                call.respondText(it)
+                                call.respondHtmlTemplate(DefaultTemplate()) {
+                                    roomsPage(listOf("a", "b", "c", "d", "e", "f", "g"))
+                                }
+                                return@get
+                            }
+                        }
+                        call.respondRedirect("/")
+                    }
+                    get("{id}") {
+                        ensureSession { session ->
+                            playerNames[session]?.let {
+                                call.respondHtmlTemplate(DefaultTemplate()) {
+                                    roomPage(it, call.parameters["id"] ?: "No room provided")
+                                }
                                 return@get
                             }
                         }
@@ -168,6 +178,10 @@ class Amadeus(val database: Database) {
                 resources("static")
             }
         }
+    }
+
+    private inline fun PipelineContext<Unit, ApplicationCall>.ensureSession(block: (PlayerSession) -> Unit) {
+        call.sessions.get<PlayerSession>()?.let { block(it) }
     }
 
     private val playerNames = ConcurrentHashMap<PlayerSession, String>()

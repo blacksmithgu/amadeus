@@ -23,12 +23,12 @@ class ApplicationTest {
                     setBody(listOf("displayName" to expected).formUrlEncode())
                 }.run {
                     assertEquals(HttpStatusCode.Found, response.status())
-                    assertEquals("/game", response.headers["Location"])
+                    assertEquals("/room", response.headers["Location"])
                     assertEquals(null, response.content)
                 }
-                handleRequest(HttpMethod.Get, "/game").run {
+                handleRequest(HttpMethod.Get, "/room").run {
                     assertEquals(HttpStatusCode.OK, response.status())
-                    assertEquals(expected, response.content)
+                    assertTrue { response.content?.contains(expected) ?: false }
                 }
             }
         }

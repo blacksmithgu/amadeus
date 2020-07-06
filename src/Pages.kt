@@ -35,7 +35,38 @@ fun DefaultTemplate.registrationPage() {
                 required = true
                 autoFocus = true
             }
-            button(classes = "btn btn-lg btn-primary btn-block") { +"Enter"}
+            button(classes = "btn btn-lg btn-primary btn-block") { +"Enter" }
         }
+    }
+}
+
+fun DefaultTemplate.roomsPage(rooms: List<String>) {
+    content {
+        container {
+            row {
+                for (room in rooms) {
+                    col(GridBreakpoint.MEDIUM, 4) {
+                        card {
+                            classes += setOf("mt-4", "shadow-sm")
+                            cardBody {
+                                h5(classes = "card-title") { +room }
+                                p(classes = "card-text") {
+                                    +"Some utterly useless example text to confuse the player even more and take up space"
+                                }
+                                a(href = "/room/$room", classes = "btn btn-primary float-right") {
+                                    +"Join"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fun DefaultTemplate.roomPage(player: String, room: String) {
+    content {
+        h1 { +"$player joined room $room" }
     }
 }
