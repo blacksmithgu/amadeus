@@ -220,6 +220,6 @@ inline class JoinRoomSession(val id: String)
     /** Route for room-related operations; shows the room list by default. */
     @Location("room") class Rooms {
         /** Route for a specific room with the given id. */
-        @Location("/room/{id}") data class Room(val id: String)
+        @Location("{id}") data class Room(val id: String)
     }
 }

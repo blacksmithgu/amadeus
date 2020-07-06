@@ -11,7 +11,7 @@ class DefaultTemplate : Template<HTML> {
         head {
             title("Amadeus")
             meta(name = "description", content = "Amadeus - Youtube Music Guessing Game")
-            styleLink("main.css")
+            styleLink("/main.css")
         }
         body {
             insert(content)
