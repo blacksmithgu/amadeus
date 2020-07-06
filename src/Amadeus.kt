@@ -135,13 +135,14 @@ class Amadeus(val database: Database, val downloader: YoutubeDownloader) {
         // Main routing table.
         routing {
             // Landing page, allows the player to register a display name
-            get<RootRoute> {
+            get<Root> {
                 call.respondHtmlTemplate(DefaultTemplate()) {
                     registrationPage()
                 }
             }
+
             // Register a name to the current session so that players can identify each other
-            post<RegisterRoute> {
+            post<Root.Register> {
                 ensureSession { session ->
                     call.receiveParameters()["displayName"]?.let {
                         playerNames[session] = it
@@ -152,7 +153,7 @@ class Amadeus(val database: Database, val downloader: YoutubeDownloader) {
                 call.respondRedirect("/")
             }
 
-            get<RoomsRoute> {
+            get<Root.Rooms> {
                 ensureSession { session ->
                     // Display a list of rooms
                     playerNames[session]?.let {
@@ -171,13 +172,13 @@ class Amadeus(val database: Database, val downloader: YoutubeDownloader) {
                 call.respondRedirect("/")
             }
 
-            get<RoomRoute> { roomRequest ->
+            get<Root.Rooms.Room> { roomRequest ->
                 ensureSession { session ->
                     // Join a specific room, this page will create a WebSocket for game communication
                     call.sessions.clear<JoinRoomSession>()
                     playerNames[session]?.let {
                         call.respondHtmlTemplate(DefaultTemplate()) {
-                            roomPage(it, roomRequest.id ?: "No room provided")
+                            roomPage(it, roomRequest.id)
                         }
                         return@get
                     }
@@ -212,27 +213,13 @@ inline class PlayerSession(val id: String)
  */
 inline class JoinRoomSession(val id: String)
 
-/**
- * Route for the root page
- */
-@Location("/")
-class RootRoute
-
-/**
- * Route for registering a display name
- */
-@Location("/register")
-class RegisterRoute
-
-/**
- * Route for displaying the available rooms
- */
-@Location("/room")
-class RoomsRoute
-
-/**
- * Route for joining a room
- */
-@Location("/room/{id}")
-data class RoomRoute(val id: String)
-
+/** Root of the typed routing table. */
+@Location("/") class Root {
+    /** Route for registering a new user. */
+    @Location("register") class Register
+    /** Route for room-related operations; shows the room list by default. */
+    @Location("room") class Rooms {
+        /** Route for a specific room with the given id. */
+        @Location("/room/{id}") data class Room(val id: String)
+    }
+}
