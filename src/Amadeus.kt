@@ -12,12 +12,13 @@ import io.ktor.http.cio.websocket.timeout
 import io.ktor.http.content.CachingOptions
 import io.ktor.http.content.resources
 import io.ktor.http.content.static
+import io.ktor.locations.Location
+import io.ktor.locations.Locations
+import io.ktor.locations.get
+import io.ktor.locations.post
 import io.ktor.request.path
 import io.ktor.request.receiveParameters
 import io.ktor.response.respondRedirect
-import io.ktor.routing.get
-import io.ktor.routing.post
-import io.ktor.routing.route
 import io.ktor.routing.routing
 import io.ktor.serialization.json
 import io.ktor.sessions.*
@@ -123,6 +124,9 @@ class Amadeus(val database: Database, val downloader: YoutubeDownloader) {
             cookie<JoinRoomSession>("JOIN_ROOM")
         }
 
+        // Enable the use of locations, a type safe way to create routes
+        install(Locations)
+
         // Create a session in each request if no session exists
         intercept(ApplicationCallPipeline.Features) {
             call.sessions.getOrSet { PlayerSession(generateNonce()) }
@@ -130,60 +134,57 @@ class Amadeus(val database: Database, val downloader: YoutubeDownloader) {
 
         // Main routing table.
         routing {
-            route("/") {
-                // Landing page, allows the player to register a display name
-                get {
-                    call.respondHtmlTemplate(DefaultTemplate()) {
-                        registrationPage()
+            // Landing page, allows the player to register a display name
+            get<RootRoute> {
+                call.respondHtmlTemplate(DefaultTemplate()) {
+                    registrationPage()
+                }
+            }
+            // Register a name to the current session so that players can identify each other
+            post<RegisterRoute> {
+                ensureSession { session ->
+                    call.receiveParameters()["displayName"]?.let {
+                        playerNames[session] = it
+                        call.respondRedirect("/room")
+                        return@post
                     }
                 }
-                route("register") {
-                    // Register a name to the current session so that players can identify each other
-                    post {
-                        ensureSession { session ->
-                            call.receiveParameters()["displayName"]?.let {
-                                playerNames[session] = it
-                                call.respondRedirect("/room")
-                                return@post
-                            }
-                        }
-                        call.respondRedirect("/")
-                    }
-                }
-                route("room") {
+                call.respondRedirect("/")
+            }
+
+            get<RoomsRoute> {
+                ensureSession { session ->
                     // Display a list of rooms
-                    get {
-                        ensureSession { session ->
-                            playerNames[session]?.let {
-                                // Redirect if the player had tried joining a room earlier
-                                call.sessions.get<JoinRoomSession>()?.let {
-                                    call.respondRedirect("/room/${it.id}")
-                                    return@get
-                                }
-                                // Display the rooms
-                                call.respondHtmlTemplate(DefaultTemplate()) {
-                                    roomsPage(listOf("a", "b", "c", "d", "e", "f", "g"))
-                                }
-                                return@get
-                            }
+                    playerNames[session]?.let {
+                        // Redirect if the player had tried joining a room earlier
+                        call.sessions.get<JoinRoomSession>()?.let {
+                            call.respondRedirect("/room/${it.id}")
+                            return@get
                         }
-                        call.respondRedirect("/")
+                        // Display the rooms
+                        call.respondHtmlTemplate(DefaultTemplate()) {
+                            roomsPage(listOf("a", "b", "c", "d", "e", "f", "g"))
+                        }
+                        return@get
                     }
+                }
+                call.respondRedirect("/")
+            }
+
+            get<RoomRoute> { roomRequest ->
+                ensureSession { session ->
                     // Join a specific room, this page will create a WebSocket for game communication
-                    get("{id}") {
-                        ensureSession { session ->
-                            call.sessions.clear<JoinRoomSession>()
-                            playerNames[session]?.let {
-                                call.respondHtmlTemplate(DefaultTemplate()) {
-                                    roomPage(it, call.parameters["id"] ?: "No room provided")
-                                }
-                                return@get
-                            }
-                            // Before redirecting to the landing page, remember the room they tried joining
-                            call.sessions.set(JoinRoomSession(call.parameters["id"] ?: ""))
+                    call.sessions.clear<JoinRoomSession>()
+                    playerNames[session]?.let {
+                        call.respondHtmlTemplate(DefaultTemplate()) {
+                            roomPage(it, roomRequest.id ?: "No room provided")
                         }
-                        call.respondRedirect("/")
+                        return@get
                     }
+                    // Before redirecting to the landing page, remember the room they tried joining
+                    call.sessions.set(JoinRoomSession(call.parameters["id"] ?: ""))
+
+                    call.respondRedirect("/")
                 }
             }
 
@@ -210,3 +211,28 @@ inline class PlayerSession(val id: String)
  * Used to redirect the player back to a room if they didn't have a name.
  */
 inline class JoinRoomSession(val id: String)
+
+/**
+ * Route for the root page
+ */
+@Location("/")
+class RootRoute
+
+/**
+ * Route for registering a display name
+ */
+@Location("/register")
+class RegisterRoute
+
+/**
+ * Route for displaying the available rooms
+ */
+@Location("/room")
+class RoomsRoute
+
+/**
+ * Route for joining a room
+ */
+@Location("/room/{id}")
+data class RoomRoute(val id: String)
+
