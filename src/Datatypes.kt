@@ -27,11 +27,25 @@ enum class SongOrigin {
 }
 
 /** A song in the system; associated with an arbitrary number of sources. */
-data class Song(val id: Int, val name: String, val uploadTime: LocalDateTime, val origin: SongOrigin, val dataSource: String)
+data class Song(val id: Int, val name: String, val uploadTime: LocalDateTime, val origin: SongOrigin, val dataSource: String, val filename: String)
 
 /** A source of songs; can also be seen as a Tag. */
 data class Source(val id: Int, val name: String, val type: String, val referenceLink: String?, val createdTime: LocalDateTime)
 
 /** A link between a song and a source; annotated with the song and source IDs, as well as the type of the connection. */
 data class SongSource(val songId: Int, val sourceId: Int, val type: String)
+
+/** A queued youtube download which will be processed. */
+data class QueuedYoutubeDownload(val id: Int, val url: String, val requestTime: LocalDateTime)
+
+/** A completed youtube download (which can either be an error, or a successful download with metadata). */
+sealed class CompletedYoutubeDownload(val id: Int, val url: String, val requestTime: LocalDateTime, val completedTime: LocalDateTime) {
+    /** The download was successful and returned the given youtube metadata. */
+    class Success(id: Int, url: String, requestTime: LocalDateTime, completedTime: LocalDateTime, val meta: YoutubeMetadata)
+        : CompletedYoutubeDownload(id, url, requestTime, completedTime)
+
+    /** The download errored with the given reason. */
+    class Error(id: Int, url: String, requestTime: LocalDateTime, completedTime: LocalDateTime, val reason: String)
+        : CompletedYoutubeDownload(id, url, requestTime, completedTime)
+}
 

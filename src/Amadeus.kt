@@ -32,7 +32,7 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * Central application information and metadata.
  */
-class Amadeus(val database: Database) {
+class Amadeus(val database: Database, val downloader: YoutubeDownloader) {
 
     /** Convenience function which configures the given application with Amadeus routes. */
     fun configure(app: Application, testing: Boolean) = app.amadeus(testing)

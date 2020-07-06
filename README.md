@@ -32,12 +32,12 @@ And this to test:
 **Server-side**: 
 
 * [ ] Music storage medium (Sqlite + Filesystem)
-    * [X] Music metadata: upload origin (youtube + link, file upload + person, etc), upload time, type (game vs anime, etc), author, series ('dark souls 1', 'dark souls')
+    * [x] Music metadata: upload origin (youtube + link, file upload + person, etc), upload time, type (game vs anime, etc), author, series ('dark souls 1', 'dark souls')
     * [ ] Custom music collections that are auditable by users
     * [ ] Filter games by steam library
     * [ ] Store music using ogg + opus at 96K
 * [ ] Simple file-upload API for providing music
-* [ ] Simple youtube-fetch API for obtaining music from youtube via youtube-dl
+* [x] Simple youtube-fetch API for obtaining music from youtube via youtube-dl
     * [ ] Verifier for checking youtube-dl and python3 are both available
     * [ ] Auto-download youtube-dl if not present; can potentially also download standalone python interpreter
 * [ ] API for creating a game, joining a game (via URL), and quitting/destroying a game.

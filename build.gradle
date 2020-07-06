@@ -113,6 +113,9 @@ jooq {
     }
 }
 
+// Shorthand task for running all jooq-related tasks.
+tasks.create("jooq").dependsOn generatePrimaryJooqSchemaSource
+
 // Need to explicitly add the jooq generated schema files to the kotlin path.
 compileKotlin.dependsOn generatePrimaryJooqSchemaSource
 
