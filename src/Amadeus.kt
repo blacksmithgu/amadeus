@@ -12,10 +12,7 @@ import io.ktor.http.cio.websocket.timeout
 import io.ktor.http.content.CachingOptions
 import io.ktor.http.content.resources
 import io.ktor.http.content.static
-import io.ktor.locations.Location
-import io.ktor.locations.Locations
-import io.ktor.locations.get
-import io.ktor.locations.post
+import io.ktor.locations.*
 import io.ktor.request.path
 import io.ktor.request.receiveParameters
 import io.ktor.response.respondRedirect
@@ -146,11 +143,11 @@ class Amadeus(val database: Database, val downloader: YoutubeDownloader) {
                 ensureSession { session ->
                     call.receiveParameters()["displayName"]?.let {
                         playerNames[session] = it
-                        call.respondRedirect("/room")
+                        respondRedirect(Root.Rooms())
                         return@post
                     }
                 }
-                call.respondRedirect("/")
+                respondRedirect(Root())
             }
 
             get<Root.Rooms> {
@@ -159,7 +156,7 @@ class Amadeus(val database: Database, val downloader: YoutubeDownloader) {
                     playerNames[session]?.let {
                         // Redirect if the player had tried joining a room earlier
                         call.sessions.get<JoinRoomSession>()?.let {
-                            call.respondRedirect("/room/${it.id}")
+                            respondRedirect(Root.Rooms.Room(it.id))
                             return@get
                         }
                         // Display the rooms
@@ -169,7 +166,7 @@ class Amadeus(val database: Database, val downloader: YoutubeDownloader) {
                         return@get
                     }
                 }
-                call.respondRedirect("/")
+                respondRedirect(Root())
             }
 
             get<Root.Rooms.Room> { roomRequest ->
@@ -184,9 +181,8 @@ class Amadeus(val database: Database, val downloader: YoutubeDownloader) {
                     }
                     // Before redirecting to the landing page, remember the room they tried joining
                     call.sessions.set(JoinRoomSession(call.parameters["id"] ?: ""))
-
-                    call.respondRedirect("/")
                 }
+                respondRedirect(Root())
             }
 
             // Directly serve anything in resources/static to the root directory if previous dynamic paths fail.
@@ -198,6 +194,10 @@ class Amadeus(val database: Database, val downloader: YoutubeDownloader) {
 
     private inline fun PipelineContext<Unit, ApplicationCall>.ensureSession(block: (PlayerSession) -> Unit) {
         call.sessions.get<PlayerSession>()?.let { block(it) }
+    }
+
+    private suspend inline fun PipelineContext<*, ApplicationCall>.respondRedirect(location: Any) {
+        call.respondRedirect(application.locations.href(location))
     }
 
     private val playerNames = ConcurrentHashMap<PlayerSession, String>()
