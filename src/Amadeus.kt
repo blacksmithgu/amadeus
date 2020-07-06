@@ -120,6 +120,7 @@ class Amadeus(val database: Database) {
         // Enable the use of sessions to keep information between requests of the browser.
         install(Sessions) {
             cookie<PlayerSession>("SESSION")
+            cookie<JoinRoomSession>("JOIN_ROOM")
         }
 
         // Create a session in each request if no session exists
@@ -130,12 +131,14 @@ class Amadeus(val database: Database) {
         // Main routing table.
         routing {
             route("/") {
+                // Landing page, allows the player to register a display name
                 get {
                     call.respondHtmlTemplate(DefaultTemplate()) {
                         registrationPage()
                     }
                 }
                 route("register") {
+                    // Register a name to the current session so that players can identify each other
                     post {
                         ensureSession { session ->
                             call.receiveParameters()["displayName"]?.let {
@@ -148,9 +151,16 @@ class Amadeus(val database: Database) {
                     }
                 }
                 route("room") {
+                    // Display a list of rooms
                     get {
                         ensureSession { session ->
                             playerNames[session]?.let {
+                                // Redirect if the player had tried joining a room earlier
+                                call.sessions.get<JoinRoomSession>()?.let {
+                                    call.respondRedirect("/room/${it.id}")
+                                    return@get
+                                }
+                                // Display the rooms
                                 call.respondHtmlTemplate(DefaultTemplate()) {
                                     roomsPage(listOf("a", "b", "c", "d", "e", "f", "g"))
                                 }
@@ -159,14 +169,18 @@ class Amadeus(val database: Database) {
                         }
                         call.respondRedirect("/")
                     }
+                    // Join a specific room, this page will create a WebSocket for game communication
                     get("{id}") {
                         ensureSession { session ->
+                            call.sessions.clear<JoinRoomSession>()
                             playerNames[session]?.let {
                                 call.respondHtmlTemplate(DefaultTemplate()) {
                                     roomPage(it, call.parameters["id"] ?: "No room provided")
                                 }
                                 return@get
                             }
+                            // Before redirecting to the landing page, remember the room they tried joining
+                            call.sessions.set(JoinRoomSession(call.parameters["id"] ?: ""))
                         }
                         call.respondRedirect("/")
                     }
@@ -191,3 +205,8 @@ class Amadeus(val database: Database) {
  * A player session identified by a unique nonce ID.
  */
 inline class PlayerSession(val id: String)
+
+/**
+ * Used to redirect the player back to a room if they didn't have a name.
+ */
+inline class JoinRoomSession(val id: String)
