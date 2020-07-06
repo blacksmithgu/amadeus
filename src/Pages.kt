@@ -70,3 +70,9 @@ fun DefaultTemplate.roomPage(player: String, room: String) {
         h1 { +"$player joined room $room" }
     }
 }
+
+/** A status page which shows all in-process and completed downloads, as well as a form for submitting a new download. */
+fun DefaultTemplate.youtubeStatusPage(completed: List<CompletedYoutubeDownload>, queued: List<QueuedYoutubeDownload>) {
+    content {
+    }
+}
