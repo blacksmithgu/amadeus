@@ -127,6 +127,16 @@ compileKotlin {
     }
 }
 
+/** Cleanup automation (for deleting runtime files). */
+task cleanRuntimeFiles(type: Delete) {
+    delete 'work'
+    delete 'songs'
+    delete 'amadeus.db'
+    delete 'amadeus-test.db'
+}
+
+clean.dependsOn(cleanRuntimeFiles)
+
 /** Frontend build automation. */
 
 node {
