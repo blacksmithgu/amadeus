@@ -37,3 +37,8 @@ inline fun FlowContent.card(crossinline block: DIV.() -> Unit) {
 inline fun FlowContent.cardBody(crossinline block: DIV.() -> Unit) {
     div(classes = "card-body") { block() }
 }
+
+@HtmlTagMarker
+inline fun FlowContent.cardHeader(crossinline block: DIV.() -> Unit) {
+    div(classes = "card-header") { block() }
+}
