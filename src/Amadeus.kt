@@ -4,10 +4,7 @@ import io.ktor.application.*
 import io.ktor.features.*
 import io.ktor.html.respondHtmlTemplate
 import io.ktor.http.*
-import io.ktor.http.cio.websocket.CloseReason
-import io.ktor.http.cio.websocket.close
-import io.ktor.http.cio.websocket.pingPeriod
-import io.ktor.http.cio.websocket.timeout
+import io.ktor.http.cio.websocket.*
 import io.ktor.http.content.CachingOptions
 import io.ktor.http.content.resources
 import io.ktor.http.content.static
@@ -27,6 +24,9 @@ import io.ktor.websocket.WebSockets
 import io.ktor.websocket.webSocket
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.consumeEach
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonConfiguration
 import org.slf4j.event.Level
 import java.time.Duration
 import java.util.concurrent.ConcurrentHashMap
@@ -216,14 +216,23 @@ class Amadeus(val database: Database, val downloader: YoutubeDownloader) {
                 respondRedirect(Root())
             }.webSocket {
                 call.sessions.get<PlayerSession>()?.let {
+                    val json = Json(JsonConfiguration.Stable)
                     val room = call.parameters["id"]
                     if (!joinRoom(room, it)) {
                         close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "Cannot join room"))
                         return@webSocket
                     }
                     try {
-                        incoming.consumeEach {
-                            // TODO: Process messages
+                        incoming.consumeEach { frame ->
+                            if (frame is Frame.Text) {
+                                json.parse(Command.serializer(), frame.readText()).run {
+                                    when (commandType) {
+                                        CommandType.START -> {
+                                            send("Welcome!")
+                                        }
+                                    }
+                                }
+                            }
                         }
                     } finally {
                         leaveRoom(room, it)
@@ -292,3 +301,10 @@ class Root {
         data class Room(val id: String)
     }
 }
+
+enum class CommandType {
+    START,
+}
+
+@Serializable
+data class Command(val commandType: CommandType)
