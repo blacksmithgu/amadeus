@@ -78,6 +78,11 @@ class Database {
             .execute()
     }
 
+    /** Select all queued downloads. */
+    fun allQueuedDownloads(): List<QueuedYoutubeDownload> = withJooq {
+        it.selectFrom(QUEUED_SONG_DOWNLOADS).fetch(QUEUED_RECORD_MAPPER)
+    }
+
     /**
      * Create a new successful completed download in the database.
      */
@@ -117,6 +122,11 @@ class Database {
             .fetchOne()
 
         COMPLETED_RECORD_MAPPER.map(record)
+    }
+
+    /** Select all completed youtube downloads. */
+    fun allCompletedDownloads(): List<CompletedYoutubeDownload> = withJooq {
+        it.selectFrom(COMPLETED_SONG_DOWNLOADS).fetch(COMPLETED_RECORD_MAPPER)
     }
 
     companion object {

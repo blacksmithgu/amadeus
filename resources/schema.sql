@@ -79,9 +79,3 @@ CREATE TABLE completed_song_downloads (
     -- If this song download resulted in an error, this is non-null and the error details.
     error TEXT
 );
-
--- SQLite specific stuff. Current schema version and '0xA3ADE05' (vaguely amadeus) application ID.
--- [jooq ignore start]
-PRAGMA user_version = 1;
-PRAGMA application_id = 171630085;
--- [jooq ignore stop]

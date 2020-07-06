@@ -120,6 +120,7 @@ tasks.create("jooq").dependsOn generatePrimaryJooqSchemaSource
 // Need to explicitly add the jooq generated schema files to the kotlin path.
 compileKotlin.dependsOn generatePrimaryJooqSchemaSource
 
+// TODO: Please figure out how to remove all the 'experimental' warnings.
 compileKotlin {
     kotlinOptions {
         freeCompilerArgs = ["-Xinline-classes"]

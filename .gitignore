@@ -31,3 +31,6 @@ desktop.ini
 # Runtime junk
 amadeus.db
 amadeus-test.db
+work/
+songs/
+thumbnails/

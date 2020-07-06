@@ -74,5 +74,57 @@ fun DefaultTemplate.roomPage(player: String, room: String) {
 /** A status page which shows all in-process and completed downloads, as well as a form for submitting a new download. */
 fun DefaultTemplate.youtubeStatusPage(completed: List<CompletedYoutubeDownload>, queued: List<QueuedYoutubeDownload>) {
     content {
+        h1(classes = "text-center") { +"Youtube-DL Status" }
+        form {
+            action = "/youtube-dl"
+            method = FormMethod.post
+            textArea(classes = "form-control") {
+                id = "inputUrls"
+                name = "urls"
+                placeholder = "<Enter list of newline-seperated urls here>"
+                required = true
+                autoFocus = true
+            }
+            button(classes = "btn btn-lg btn-primary btn-block") { +"Submit" }
+        }
+        h2(classes = "text-center") { +"Queued Downloads" }
+        table {
+            tr {
+                th { +"ID" }
+                th { +"URL" }
+                th { +"Queued Time" }
+            }
+            for (download in queued) {
+                tr {
+                    td { text(download.id) }
+                    td { text(download.url) }
+                    td { text(download.requestTime.toString()) }
+                }
+            }
+        }
+        h2(classes = "text-center") { +"Completed Downloads" }
+        table {
+            tr {
+                th { +"ID" }
+                th { +"URL" }
+                th { +"Queued Time" }
+                th { +"Completed Time" }
+                th { +"Title" }
+            }
+            for (download in completed) {
+                tr {
+                    td { text(download.id) }
+                    td { text(download.url) }
+                    td { text(download.requestTime.toString()) }
+                    td { text(download.completedTime.toString()) }
+                    td {
+                        when(download) {
+                            is CompletedYoutubeDownload.Success -> text(download.meta.title ?: "<unknown>")
+                            else -> text("<failed>")
+                        }
+                    }
+                }
+            }
+        }
     }
 }

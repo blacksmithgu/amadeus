@@ -3,10 +3,7 @@ package io.meltec.amadeus
 import io.ktor.application.*
 import io.ktor.features.*
 import io.ktor.html.respondHtmlTemplate
-import io.ktor.http.CacheControl
-import io.ktor.http.ContentType
-import io.ktor.http.HttpHeaders
-import io.ktor.http.HttpMethod
+import io.ktor.http.*
 import io.ktor.http.cio.websocket.pingPeriod
 import io.ktor.http.cio.websocket.timeout
 import io.ktor.http.content.CachingOptions
@@ -15,6 +12,7 @@ import io.ktor.http.content.static
 import io.ktor.locations.*
 import io.ktor.request.path
 import io.ktor.request.receiveParameters
+import io.ktor.response.respond
 import io.ktor.response.respondRedirect
 import io.ktor.routing.routing
 import io.ktor.serialization.json
@@ -138,6 +136,26 @@ class Amadeus(val database: Database, val downloader: YoutubeDownloader) {
                 }
             }
 
+            // Shows all active youtube downloads (completed and queued), as well as a form for submitting new ones.
+            get<Root.YoutubeDl> {
+                val queued = database.allQueuedDownloads()
+                val completed = database.allCompletedDownloads()
+                call.respondHtmlTemplate(DefaultTemplate()) {
+                    youtubeStatusPage(completed, queued)
+                }
+            }
+
+            post<Root.YoutubeDl> {
+                // TODO: Need a JSON format for proper errors.
+                val urls = call.receiveParameters()["urls"] ?: run {
+                    call.respond(HttpStatusCode.BadRequest, "No urls specified")
+                    return@post
+                }
+
+                for (url in urls.lines()) downloader.queue(url)
+                call.respondRedirect("/youtube-dl")
+            }
+
             // Register a name to the current session so that players can identify each other
             post<Root.Register> {
                 ensureSession { session ->
@@ -217,6 +235,8 @@ inline class JoinRoomSession(val id: String)
 @Location("/") class Root {
     /** Route for registering a new user. */
     @Location("register") class Register
+    /** Route for queueing youtube-dl downloads directly and viewing their status. */
+    @Location("youtube-dl") class YoutubeDl
     /** Route for room-related operations; shows the room list by default. */
     @Location("room") class Rooms {
         /** Route for a specific room with the given id. */
