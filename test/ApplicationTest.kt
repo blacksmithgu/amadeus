@@ -13,7 +13,7 @@ class ApplicationTest {
             enableRecursiveTriggers(true)
             enforceForeignKeys(true)
         })
-        val amadeus = Amadeus(database, YoutubeDownloader(database))
+        val amadeus = Amadeus(database, YoutubeDownloader.createWithoutInit(database))
 
         withTestApplication({ amadeus.configure(this, true) }) {
             val expected = "amazingName"

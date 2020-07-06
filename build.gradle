@@ -123,7 +123,7 @@ compileKotlin.dependsOn generatePrimaryJooqSchemaSource
 // TODO: Please figure out how to remove all the 'experimental' warnings.
 compileKotlin {
     kotlinOptions {
-        freeCompilerArgs = ["-Xinline-classes"]
+        freeCompilerArgs = ["-Xinline-classes", "-Xopt-in=kotlin.RequiresOptIn"]
     }
 }
 

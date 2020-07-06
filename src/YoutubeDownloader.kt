@@ -32,48 +32,57 @@ private val log: Logger = LoggerFactory.getLogger("youtube-dl")
 /** The format that we download music in. */
 private val FORMAT: String = "mp3"
 
+/** Default target directory to store songs in. */
+private val DEFAULT_TARGET_DIR = File("songs")
+/** Default working directory that downloads occur in. */
+private val DEFAULT_WORKING_DIR = File("work/downloader")
+/** Default number of threads to use for the downloader. */
+private val DEFAULT_THREADS = 4
+
 /**
  * A multi-threaded (and threadsafe) downloader which automatically downloads songs from download in the background;
  * songs requests (and completions) are durably stored in the database.
  */
-class YoutubeDownloader(val database: Database, val threads: Int = 4,
-                        val targetDir: File = File("songs"),
-                        val workingDir: File = File("work/downloader")) {
+class YoutubeDownloader private constructor(val database: Database, val threads: Int,
+                        val targetDir: File, val workingDir: File) {
     /** The executor for the actual downloads. */
     val executor: Executor = Executors.newFixedThreadPool(threads)
+
+    /** Available characters to name the song. */
+    private val SONG_CHARACTER_POOL: List<Char> = ('a' .. 'z') + ('A' .. 'Z') + ('0' .. '9')
+    /** The number of characters in the random song name. */
+    private val SONG_NAME_LENGTH: Int = 24
 
     /** Queue a URL to be downloaded; this will add the queue request to the database and queue it in the download thread pool. */
     fun queue(url: String): QueuedYoutubeDownload {
         val queueTime = LocalDateTime.now()
         val download = database.newQueuedDownload(url, queueTime)
 
-        executor.execute {
-            try {
-                // Make the target directory and working directory if they don't exist.
-                if (!targetDir.exists()) targetDir.mkdirs()
-                if (!workingDir.exists()) workingDir.mkdirs()
-
-                // Random location where the song will be stored.
-                val file = songFile(FORMAT)
-                val meta = downloadSingle(url, file, workingDir)
-
-                database.newSuccessfulCompletedDownload(url, queueTime, LocalDateTime.now(), meta)
-            } catch (ex: CommandRunException) {
-                database.newFailedCompletedDownload(url, queueTime, LocalDateTime.now(), ex.toString())
-            } catch (ex: IOException) {
-                database.newFailedCompletedDownload(url, queueTime, LocalDateTime.now(), ex.toString())
-            } finally {
-                database.deleteQueuedDownload(download.id)
-            }
-        }
+        executor.execute { execDownload(download) }
 
         return download
     }
 
-    /** Available characters to name the song. */
-    private val SONG_CHARACTER_POOL: List<Char> = ('a' .. 'z') + ('A' .. 'Z') + ('0' .. '9')
-    /** The number of characters in the random song name. */
-    private val SONG_NAME_LENGTH: Int = 24
+    /** Internal method which executes the download directly; this should only be run on the executor. */
+    private fun execDownload(download: QueuedYoutubeDownload) {
+        try {
+            // Make the target directory and working directory if they don't exist.
+            if (!targetDir.exists()) targetDir.mkdirs()
+            if (!workingDir.exists()) workingDir.mkdirs()
+
+            // Random location where the song will be stored.
+            val file = songFile(FORMAT)
+            val meta = downloadYoutube(download.url, file, workingDir)
+
+            database.newSuccessfulCompletedDownload(download.url, download.requestTime, LocalDateTime.now(), meta)
+        } catch (ex: CommandRunException) {
+            database.newFailedCompletedDownload(download.url, download.requestTime, LocalDateTime.now(), ex.toString())
+        } catch (ex: IOException) {
+            database.newFailedCompletedDownload(download.url, download.requestTime, LocalDateTime.now(), ex.toString())
+        } finally {
+            database.deleteQueuedDownload(download.id)
+        }
+    }
 
     /** Create a name for a new song file. */
     private fun songFile(extension: String): File {
@@ -93,6 +102,36 @@ class YoutubeDownloader(val database: Database, val threads: Int = 4,
             .joinToString("")
             .plus(".")
             .plus(extension)
+
+    companion object {
+        /** Create a new downloader without loading old jobs from the database. */
+        @JvmStatic
+        fun createWithoutInit(database: Database, threads: Int = DEFAULT_THREADS,
+                              targetDir: File = DEFAULT_TARGET_DIR,
+                              workingDir: File = DEFAULT_WORKING_DIR): YoutubeDownloader {
+            return YoutubeDownloader(database, threads, targetDir, workingDir)
+        }
+
+        /** Create a new downloader, loading old jobs from the database. */
+        @JvmStatic
+        fun create(database: Database, threads: Int = DEFAULT_THREADS,
+                   targetDir: File = DEFAULT_TARGET_DIR,
+                   workingDir: File = DEFAULT_WORKING_DIR): YoutubeDownloader {
+            val downloader = YoutubeDownloader(database, threads, targetDir, workingDir)
+
+            // Clear old working directory.
+            if (workingDir.exists()) try { workingDir.deleteRecursively() } catch (ex: IOException) { }
+
+            // Re-queue old queued jobs which were not finished.
+            val jobs = database.allQueuedDownloads()
+            log.info("Re-queueing {} old jobs which were not completed, and clearing the working directory", jobs.size)
+            for (job in jobs) {
+                downloader.executor.execute { downloader.execDownload(job) }
+            }
+
+            return downloader
+        }
+    }
 }
 
 /**
@@ -103,7 +142,7 @@ class YoutubeDownloader(val database: Database, val threads: Int = 4,
  * Throws a [CommandRunException] on failure.
  */
 @kotlinx.serialization.UnstableDefault // TODO: Why do we need this? It's needed by Json.parseJson.
-private fun downloadSingle(url: String, target: File, workDir: File): YoutubeMetadata {
+fun downloadYoutube(url: String, target: File, workDir: File): YoutubeMetadata {
     log.debug("Downloading '{}' to '{}' (working dir '{}')", url, target, workDir)
 
     val startTime = System.currentTimeMillis()

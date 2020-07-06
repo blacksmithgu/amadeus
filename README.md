@@ -40,7 +40,11 @@ And this to test:
 * [x] Simple youtube-fetch API for obtaining music from youtube via youtube-dl
     * [ ] Verifier for checking youtube-dl and python3 are both available
     * [ ] Auto-download youtube-dl if not present; can potentially also download standalone python interpreter
+    * [ ] UI for mass-queueing 
 * [ ] API for creating a game, joining a game (via URL), and quitting/destroying a game.
+    * [ ] Creating a new room
+    * [ ] Joining existing rooms
+    * [ ] Automatically destroy/quit empty rooms
 * [ ] Music streaming during a game, as well as basic game structure (incl. guessing and game state synchronization).
 
 **Client-side**: 

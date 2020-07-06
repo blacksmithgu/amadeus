@@ -32,7 +32,7 @@ fun main(args: Array<String>) {
         log.info("Sqlite database `amadeus.db` loaded (version ${database.version()})")
     }
 
-    val amadeus = Amadeus(database, YoutubeDownloader(database))
+    val amadeus = Amadeus(database, YoutubeDownloader.create(database))
     embeddedServer(Netty, port = 8080) {
         amadeus.configure(this, true)
     }.start(wait = true)
