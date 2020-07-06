@@ -53,3 +53,9 @@ And this to test:
 * [ ] Web-socket based game page
 * [ ] Use the Web Audio API for playing audio (data can be sent over websockets): https://www.html5rocks.com/en/tutorials/webaudio/intro/
 
+**Extension Features**:
+
+* [ ] Achievements System
+    * [ ] Meet the developers achievement
+    * [ ] Guessing X songs correctly across lifetime
+    * [ ] Play in a total of X games
