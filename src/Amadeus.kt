@@ -4,6 +4,8 @@ import io.ktor.application.*
 import io.ktor.features.*
 import io.ktor.html.respondHtmlTemplate
 import io.ktor.http.*
+import io.ktor.http.cio.websocket.CloseReason
+import io.ktor.http.cio.websocket.close
 import io.ktor.http.cio.websocket.pingPeriod
 import io.ktor.http.cio.websocket.timeout
 import io.ktor.http.content.CachingOptions
@@ -17,18 +19,28 @@ import io.ktor.response.respondRedirect
 import io.ktor.routing.routing
 import io.ktor.serialization.json
 import io.ktor.sessions.*
+import io.ktor.util.KtorExperimentalAPI
 import io.ktor.util.date.GMTDate
 import io.ktor.util.generateNonce
 import io.ktor.util.pipeline.PipelineContext
 import io.ktor.websocket.WebSockets
+import io.ktor.websocket.webSocket
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.channels.consumeEach
 import org.slf4j.event.Level
 import java.time.Duration
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
+import kotlin.contracts.ExperimentalContracts
+import kotlin.contracts.contract
 
 /**
  * Central application information and metadata.
  */
+@OptIn(KtorExperimentalLocationsAPI::class)
 class Amadeus(val database: Database, val downloader: YoutubeDownloader) {
+    private val playerNames = ConcurrentHashMap<PlayerSession, String>()
+    internal val rooms = ConcurrentHashMap<String, MutableList<PlayerSession>>()
 
     /** Convenience function which configures the given application with Amadeus routes. */
     fun configure(app: Application, testing: Boolean) = app.amadeus(testing)
@@ -37,6 +49,7 @@ class Amadeus(val database: Database, val downloader: YoutubeDownloader) {
      * Configuration function on application which configures amadeus routes. The `this` in this function is
      * `Application`, not `Amadeus`.
      */
+    @OptIn(ExperimentalCoroutinesApi::class, KtorExperimentalAPI::class)
     fun Application.amadeus(testing: Boolean) {
         // Automatically compress responses for network savings.
         install(Compression) {
@@ -201,6 +214,22 @@ class Amadeus(val database: Database, val downloader: YoutubeDownloader) {
                     call.sessions.set(JoinRoomSession(call.parameters["id"] ?: ""))
                 }
                 respondRedirect(Root())
+            }.webSocket {
+                call.sessions.get<PlayerSession>()?.let {
+                    val room = call.parameters["id"]
+                    if (!joinRoom(room, it)) {
+                        close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "Cannot join room"))
+                        return@webSocket
+                    }
+                    try {
+                        incoming.consumeEach {
+                            // TODO: Process messages
+                        }
+                    } finally {
+                        leaveRoom(room, it)
+                    }
+                }
+                close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "No session"))
             }
 
             // Directly serve anything in resources/static to the root directory if previous dynamic paths fail.
@@ -214,11 +243,23 @@ class Amadeus(val database: Database, val downloader: YoutubeDownloader) {
         call.sessions.get<PlayerSession>()?.let { block(it) }
     }
 
-    private suspend inline fun PipelineContext<*, ApplicationCall>.respondRedirect(location: Any) {
-        call.respondRedirect(application.locations.href(location))
+    private suspend inline fun PipelineContext<Unit, ApplicationCall>.respondRedirect(location: Any) {
+        call.respondRedirect(href(location))
     }
 
-    private val playerNames = ConcurrentHashMap<PlayerSession, String>()
+    private fun leaveRoom(room: String, playerSession: PlayerSession) {
+        rooms[room]?.remove(playerSession)
+    }
+}
+
+@OptIn(ExperimentalContracts::class)
+private fun Amadeus.joinRoom(room: String?, playerSession: PlayerSession): Boolean {
+    contract {
+        returns(true) implies (room != null)
+    }
+    return rooms.computeIfAbsent(room ?: return false) { CopyOnWriteArrayList() }.run {
+        !contains(playerSession).also { if (it) add(playerSession) }
+    }
 }
 
 /**
@@ -232,14 +273,22 @@ inline class PlayerSession(val id: String)
 inline class JoinRoomSession(val id: String)
 
 /** Root of the typed routing table. */
-@Location("/") class Root {
+@OptIn(KtorExperimentalLocationsAPI::class)
+@Location("/")
+class Root {
     /** Route for registering a new user. */
-    @Location("register") class Register
+    @Location("register")
+    class Register
+
     /** Route for queueing youtube-dl downloads directly and viewing their status. */
-    @Location("youtube-dl") class YoutubeDl
+    @Location("youtube-dl")
+    class YoutubeDl
+
     /** Route for room-related operations; shows the room list by default. */
-    @Location("room") class Rooms {
+    @Location("room")
+    class Rooms {
         /** Route for a specific room with the given id. */
-        @Location("{id}") data class Room(val id: String)
+        @Location("{id}")
+        data class Room(val id: String)
     }
 }
