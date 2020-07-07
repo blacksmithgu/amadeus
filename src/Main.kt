@@ -1,12 +1,13 @@
 package io.meltec.amadeus
 
+import io.ktor.application.Application
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
 import org.slf4j.LoggerFactory
 import org.sqlite.SQLiteConfig
 import java.util.regex.Pattern
 
-fun main(args: Array<String>) {
+fun Application.server() {
     val log = LoggerFactory.getLogger("main")
 
     // TODO: Some basic build automation around the application ID and user version - useful for automatic upgrades!
@@ -16,7 +17,7 @@ fun main(args: Array<String>) {
     })
 
     // TODO: Implement database migrations/updates.
-    if(!database.initialized()) {
+    if (!database.initialized()) {
         log.warn("The database has not been initialized, creating a new database at `amadeus.db`")
         val schema = Amadeus::class.java.getResource("/schema.sql").readText()
 
@@ -32,8 +33,10 @@ fun main(args: Array<String>) {
         log.info("Sqlite database `amadeus.db` loaded (version ${database.version()})")
     }
 
-    val amadeus = Amadeus(database, YoutubeDownloader.create(database))
-    embeddedServer(Netty, port = 8080) {
-        amadeus.configure(this, true)
-    }.start(wait = true)
+    Amadeus(database, YoutubeDownloader.create(database)).configure(this, true)
+}
+
+fun main(args: Array<String>) {
+    embeddedServer(Netty, watchPaths = listOf("amadeus/build"), port = 8080, module = Application::server)
+        .start(wait = true)
 }
