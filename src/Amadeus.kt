@@ -22,6 +22,7 @@ import io.ktor.util.generateNonce
 import io.ktor.util.pipeline.PipelineContext
 import io.ktor.websocket.WebSockets
 import io.ktor.websocket.webSocket
+import io.meltec.amadeus.templates.*
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.consumeEach
 import kotlinx.serialization.Serializable

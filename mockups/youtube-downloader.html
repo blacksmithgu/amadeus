@@ -1,0 +1,109 @@
+<html>
+    <head>
+        <title>Amadeus - Youtube-DL Status</title>
+        <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.0/css/bootstrap.min.css"
+        integrity="sha384-9aIt2nRpC12Uk9gS9baDl411NQApFmC26EwAOH8WgZl5MYYxFfc+NcPb1dKGj7Sk" crossorigin="anonymous">
+    </head>
+    <body>
+        <div id="content" class="container">
+            <h1 class="text-center">Youtube Download Status</h1>
+            <div id="submit-form" class="container rounded border">
+                <form class="pt-1">
+                    <label for="urls">Youtube URLs</label>
+                    <textarea class="form-control" id="urls" name="urls" rows="4"></textarea>
+                    <button type="submit" class="btn btn-primary text-center">Queue Downloads</button>
+                </form>
+            </div>
+
+            <div id="queued-downloads" class="container rounded border mt-4">
+                <h1>Queued Downloads</h1>
+                <table class="table table-sm table-striped table-hover text-center">
+                    <thead>
+                        <tr>
+                            <th scope="col">ID</th>
+                            <th scope="col">URL</th>
+                            <th scope="col">Request Time</th>
+                            <th scope="col" style="width: 1px;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <th scope="row">1</th>
+                            <td>google.com</td>
+                            <td>June 16, 4:45pm</td>
+                            <td class="text-right">
+                                <button class="btn btn-danger">Cancel</button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row">2</th>
+                            <td>google.com</td>
+                            <td>June 16, 4:45pm</td>
+                            <td class="text-right">
+                                <button class="btn btn-danger">Cancel</button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row">3</th>
+                            <td>google.com</td>
+                            <td>June 16, 4:45pm</td>
+                            <td class="text-right">
+                                <button class="btn btn-danger">Cancel</button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div id="completed-downloads" class="container rounded border mt-4">
+                <h1>Completed Downloads</h1>
+                <table class="table table-sm table-striped table-hover text-left">
+                    <thead>
+                        <tr>
+                            <th scope="col">ID</th>
+                            <th scope="col">URL</th>
+                            <th scope="col">Request Time</th>
+                            <th scope="col">Complete Time</th>
+                            <th scope="col">Title</th>
+                            <th scope="col" class="text-center" style="width: 1%;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr class="table-success">
+                            <th scope="row">1</th>
+                            <td>google.com</td>
+                            <td>June 16, 4:45pm</td>
+                            <td>June 16, 4:51pm</td>
+                            <td>Google</td>
+                            <td class="text-right" style="white-space: nowrap;">
+                                <button class="btn btn-primary">Make into Song</button>
+                                <button class="btn btn-danger">Delete</button>
+                            </td>
+                        </tr>
+                        <tr class="table-danger">
+                            <th scope="row">2</th>
+                            <td>google.com</td>
+                            <td>June 16, 4:45pm</td>
+                            <td>June 16, 4:52pm</td>
+                            <td>Google</td>
+                            <td class="text-right" style="white-space: nowrap;">
+                                <button class="btn btn-danger">Delete</button>
+                            </td>
+                        </tr>
+                        <tr class="table-success">
+                            <th scope="row">3</th>
+                            <td>google.com</td>
+                            <td>June 16, 4:45pm</td>
+                            <td>June 17, 2:45pm</td>
+                            <td>Google</td>
+                            <td class="text-right" style="white-space: nowrap;">
+                                <button class="btn btn-primary">Make into Song</button>
+                                <button class="btn btn-danger">Delete</button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </body>
+</html>

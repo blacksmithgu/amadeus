@@ -1,4 +1,4 @@
-package io.meltec.amadeus
+package io.meltec.amadeus.templates
 
 import kotlinx.html.DIV
 import kotlinx.html.FlowContent
