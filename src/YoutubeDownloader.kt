@@ -1,9 +1,6 @@
 package io.meltec.amadeus
 
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonException
-import kotlinx.serialization.json.content
-import kotlinx.serialization.json.int
+import kotlinx.serialization.json.*
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import java.io.File
@@ -14,6 +11,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ThreadLocalRandom
 import java.util.concurrent.TimeUnit
 import kotlin.streams.asSequence
+import measureTimeMillis
 
 /**
  * Full youtube song downloader; provides simple blocking methods for downloading Youtube songs from given URLS
@@ -30,45 +28,39 @@ import kotlin.streams.asSequence
 private val log: Logger = LoggerFactory.getLogger("youtube-dl")
 
 /** The format that we download music in. */
-private val FORMAT: String = "mp3"
+private const val FORMAT: String = "mp3"
 
 /** Default target directory to store songs in. */
 private val DEFAULT_TARGET_DIR = File("songs")
 /** Default working directory that downloads occur in. */
 private val DEFAULT_WORKING_DIR = File("work/downloader")
 /** Default number of threads to use for the downloader. */
-private val DEFAULT_THREADS = 4
+private const val DEFAULT_THREADS = 4
 
 /**
  * A multi-threaded (and threadsafe) downloader which automatically downloads songs from download in the background;
  * songs requests (and completions) are durably stored in the database.
  */
-class YoutubeDownloader private constructor(val database: Database, val threads: Int,
-                        val targetDir: File, val workingDir: File) {
+class YoutubeDownloader private constructor(
+    private val database: Database,
+    threads: Int = DEFAULT_THREADS,
+    private val targetDir: File = DEFAULT_TARGET_DIR,
+    private val workingDir: File = DEFAULT_WORKING_DIR
+) {
     /** The executor for the actual downloads. */
     val executor: Executor = Executors.newFixedThreadPool(threads)
 
-    /** Available characters to name the song. */
-    private val SONG_CHARACTER_POOL: List<Char> = ('a' .. 'z') + ('A' .. 'Z') + ('0' .. '9')
-    /** The number of characters in the random song name. */
-    private val SONG_NAME_LENGTH: Int = 24
-
     /** Queue a URL to be downloaded; this will add the queue request to the database and queue it in the download thread pool. */
-    fun queue(url: String): QueuedYoutubeDownload {
-        val queueTime = LocalDateTime.now()
-        val download = database.newQueuedDownload(url, queueTime)
-
-        executor.execute { execDownload(download) }
-
-        return download
+    fun queue(url: String) = database.newQueuedDownload(url, LocalDateTime.now()).also {
+        executor.execute { execDownload(it) }
     }
 
     /** Internal method which executes the download directly; this should only be run on the executor. */
     private fun execDownload(download: QueuedYoutubeDownload) {
         try {
             // Make the target directory and working directory if they don't exist.
-            if (!targetDir.exists()) targetDir.mkdirs()
-            if (!workingDir.exists()) workingDir.mkdirs()
+            targetDir.takeUnless(File::exists)?.run(File::mkdirs)
+            workingDir.takeUnless(File::exists)?.run(File::mkdirs)
 
             // Random location where the song will be stored.
             val file = songFile(FORMAT)
@@ -86,29 +78,35 @@ class YoutubeDownloader private constructor(val database: Database, val threads:
 
     /** Create a name for a new song file. */
     private fun songFile(extension: String): File {
-        var file = File(targetDir, randomName(extension))
-        while (file.exists()) {
+        var file: File
+        do {
             file = File(targetDir, randomName(extension))
-        }
+        } while (file.exists())
 
         return file
     }
 
-    /** Generate a random [SONG_LENGTH_NAME]-length string from [SONG_CHARACTER_POOL]. */
+    /** Generate a random [SONG_NAME_LENGTH]-length string from [SONG_CHARACTER_POOL]. */
     private fun randomName(extension: String): String =
         ThreadLocalRandom.current().ints(SONG_NAME_LENGTH.toLong(), 0, SONG_CHARACTER_POOL.size)
             .asSequence()
             .map(SONG_CHARACTER_POOL::get)
-            .joinToString("")
-            .plus(".")
-            .plus(extension)
+            .joinToString("", postfix = ".$extension")
 
     companion object {
+        /** Available characters to name the song. */
+        private val SONG_CHARACTER_POOL = ('a'..'z') + ('A'..'Z') + ('0'..'9')
+
+        /** The number of characters in the random song name. */
+        private const val SONG_NAME_LENGTH = 24
+
         /** Create a new downloader without loading old jobs from the database. */
         @JvmStatic
-        fun createWithoutInit(database: Database, threads: Int = DEFAULT_THREADS,
-                              targetDir: File = DEFAULT_TARGET_DIR,
-                              workingDir: File = DEFAULT_WORKING_DIR): YoutubeDownloader {
+        fun createWithoutInit(
+            database: Database, threads: Int = DEFAULT_THREADS,
+            targetDir: File = DEFAULT_TARGET_DIR,
+            workingDir: File = DEFAULT_WORKING_DIR
+        ): YoutubeDownloader {
             return YoutubeDownloader(database, threads, targetDir, workingDir)
         }
 
@@ -120,7 +118,7 @@ class YoutubeDownloader private constructor(val database: Database, val threads:
             val downloader = YoutubeDownloader(database, threads, targetDir, workingDir)
 
             // Clear old working directory.
-            if (workingDir.exists()) try { workingDir.deleteRecursively() } catch (ex: IOException) { }
+            workingDir.takeIf(File::exists)?.run { try { deleteRecursively() } catch (ex: IOException) { } }
 
             // Re-queue old queued jobs which were not finished.
             val jobs = database.allQueuedDownloads()
@@ -141,40 +139,52 @@ class YoutubeDownloader private constructor(val database: Database, val threads:
  *
  * Throws a [CommandRunException] on failure.
  */
-@kotlinx.serialization.UnstableDefault // TODO: Why do we need this? It's needed by Json.parseJson.
 fun downloadYoutube(url: String, target: File, workDir: File): YoutubeMetadata {
     log.debug("Downloading '{}' to '{}' (working dir '{}')", url, target, workDir)
 
-    val startTime = System.currentTimeMillis()
-    val (exitCode, output, errOutput) = runCommand(workDir, listOf(
-        "youtube-dl", "-x", "--audio-format", FORMAT, "--print-json", "--id", "--no-playlist", url
-    ))
+    val meta: YoutubeMetadata
+    val timeTaken = measureTimeMillis {
+        val (exitCode, output, errOutput) = runCommand(
+            workDir, listOf(
+                "youtube-dl", "-x", "--audio-format", FORMAT, "--print-json", "--id", "--no-playlist", url
+            )
+        )
 
-    // If the program failed due to a non-zero exit code,exit immediately.
-    if (exitCode != 0) throw CommandRunException("Non-zero exit code: $errOutput")
+        // If the program failed due to a non-zero exit code,exit immediately.
+        if (exitCode != 0) throw CommandRunException("Non-zero exit code: $errOutput")
 
-    // Attempt to parse the JSON output from the program to obtain relevant information.
-    val parsed = try { Json.parseJson(output).jsonObject } catch(ex: JsonException) { throw CommandRunException("Youtube-dl did not output JSON", ex) }
+        // Attempt to parse the JSON output from the program to obtain relevant information.
+        val json = Json(JsonConfiguration.Stable)
+        val parsed = try {
+            json.parseJson(output).jsonObject
+        } catch (ex: JsonException) {
+            throw CommandRunException("Youtube-dl did not output JSON", ex)
+        }
 
-    // Find the original video file, and then do filename substitution to obtain the audio file (which has a [FORMAT] extension).
-    val videoFile = parsed.get("_filename")?.content ?: throw CommandRunException("youtube-dl did not provide a download filename")
-    val audioFile = File(workDir, File(videoFile).nameWithoutExtension + "." + FORMAT)
+        // Find the original video file, and then do filename substitution to obtain the audio file (which has a [FORMAT] extension).
+        val videoFile =
+            parsed["_filename"]?.content ?: throw CommandRunException("youtube-dl did not provide a download filename")
+        val audioFile = File(workDir, File(videoFile).nameWithoutExtension + "." + FORMAT)
 
-    // Move the audio file to the target location, then parse any remaining metadata from the JSON and return it.
-    try { audioFile.renameTo(target) } catch(ex: IOException) { throw CommandRunException("Failed to move result file to '$target'", ex) }
+        // Move the audio file to the target location, then parse any remaining metadata from the JSON and return it.
+        try {
+            audioFile.renameTo(target)
+        } catch (ex: IOException) {
+            throw CommandRunException("Failed to move result file to '$target'", ex)
+        }
 
-    val meta = YoutubeMetadata(
-        title = parsed.get("title")?.content,
-        artist = parsed.get("artist")?.content,
-        album = parsed.get("album")?.content,
-        thumbnailUrl = parsed.get("thumbnail")?.content,
-        lengthSeconds = parsed.get("duration")?.int,
-        filename = target.toString()
-    )
-    val endTime = System.currentTimeMillis()
+        meta = YoutubeMetadata(
+            title = parsed["title"]?.content,
+            artist = parsed["artist"]?.content,
+            album = parsed["album"]?.content,
+            thumbnailUrl = parsed["thumbnail"]?.content,
+            lengthSeconds = parsed["duration"]?.int,
+            filename = target.toString()
+        )
+    }
 
     log.info("Downloaded '{}' from '{}' to file '{}' (working dir '{}', {}s)",
-        meta.title ?: url, url, target, workDir, (endTime - startTime) / 1000.0)
+        meta.title ?: url, url, target, workDir, timeTaken / 1000.0)
 
     return meta
 }
@@ -194,12 +204,14 @@ private fun runCommand(workDir: File, command: List<String>): CommandRunResult {
     }
 
     try {
-        val output = proc.inputStream.bufferedReader().readText()
-        val err = proc.errorStream.bufferedReader().readText()
-        // TODO: Pass as function argument for configurability.
-        proc.waitFor(2, TimeUnit.MINUTES)
+        proc.run {
+            val output = inputStream.bufferedReader().readText()
+            val err = errorStream.bufferedReader().readText()
+            // TODO: Pass as function argument for configurability.
+            waitFor(2, TimeUnit.MINUTES)
 
-        return CommandRunResult(proc.exitValue(), output, err)
+            return CommandRunResult(exitValue(), output, err)
+        }
     } catch (ex: IOException) {
         throw CommandRunException("Command failed to run: $command", ex)
     }
