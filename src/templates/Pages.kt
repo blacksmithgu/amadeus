@@ -70,6 +70,20 @@ fun DefaultTemplate.roomsPage(rooms: List<String>) {
 fun DefaultTemplate.roomPage(player: String, room: String) {
     content {
         h1 { +"$player joined room $room" }
+        div(classes = "container-fluid h-100") {
+            div(classes = "row justify-content-center align-items-center") {
+                button(type = ButtonType.button, classes = "btn btn-lg btn-primary") {
+                    onClick = "console.log(\"Play the first song\")"
+                    + "Start Game"
+                }
+            }
+            div(classes = "row h-100 justify-content-center align-items-center") {
+                audio {
+                    controls = true
+                }
+                button(type = ButtonType.button, classes = "btn btn-primary") { + "Next Song" }
+            }
+        }
     }
 }
 
