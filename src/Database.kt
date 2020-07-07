@@ -3,8 +3,7 @@ package io.meltec.amadeus
 import org.jooq.DSLContext
 import org.jooq.RecordMapper
 import org.jooq.SQLDialect
-import org.jooq.generated.Tables.COMPLETED_SONG_DOWNLOADS
-import org.jooq.generated.Tables.QUEUED_SONG_DOWNLOADS
+import org.jooq.generated.Tables.*
 import org.jooq.generated.tables.records.*
 import org.jooq.impl.DSL
 import org.sqlite.SQLiteConfig
@@ -60,6 +59,22 @@ class Database {
         return func(DSL.using(connection(), SQLDialect.SQLITE))
     }
 
+    // Songs
+
+    /** Select all songs from the database - if you want to filter, make a query for it instead of using this function!. */
+    fun allSongs(): List<Song> = withJooq { it.selectFrom(SONGS).fetch(SONG_MAPPER) }
+
+    // Sources
+
+    /** Select all sources from the database - if you want to filter, make a query for it instead of using this function! */
+    fun allSources(): List<Source> = withJooq { it.selectFrom(SOURCES).fetch(SOURCE_MAPPER) }
+
+    // Song-Sources
+
+    fun allSongSources(): List<SongSource> = withJooq { it.selectFrom(SONGS_SOURCES).fetch(SONG_SOURCE_MAPPER) }
+
+    // Queued Downloads
+
     /** Create a new queued download entry in the database. */
     fun newQueuedDownload(url: String, time: LocalDateTime): QueuedYoutubeDownload = withJooq {
         val record = it.insertInto(QUEUED_SONG_DOWNLOADS)
@@ -82,6 +97,8 @@ class Database {
     fun allQueuedDownloads(): List<QueuedYoutubeDownload> = withJooq {
         it.selectFrom(QUEUED_SONG_DOWNLOADS).fetch(QUEUED_RECORD_MAPPER)
     }
+
+    // Completed Downloads
 
     /**
      * Create a new successful completed download in the database.

@@ -1,6 +1,7 @@
 package io.meltec.amadeus
 
 import kotlinx.serialization.json.*
+import measureTimeMillis
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import java.io.File
@@ -11,7 +12,6 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ThreadLocalRandom
 import java.util.concurrent.TimeUnit
 import kotlin.streams.asSequence
-import measureTimeMillis
 
 /**
  * Full youtube song downloader; provides simple blocking methods for downloading Youtube songs from given URLS
@@ -36,6 +36,7 @@ private val DEFAULT_TARGET_DIR = File("songs")
 private val DEFAULT_WORKING_DIR = File("work/downloader")
 /** Default number of threads to use for the downloader. */
 private const val DEFAULT_THREADS = 4
+private const val DEFAULT_WAIT_TIME_MINS = 2L
 
 /**
  * A multi-threaded (and threadsafe) downloader which automatically downloads songs from download in the background;
@@ -79,9 +80,7 @@ class YoutubeDownloader private constructor(
     /** Create a name for a new song file. */
     private fun songFile(extension: String): File {
         var file: File
-        do {
-            file = File(targetDir, randomName(extension))
-        } while (file.exists())
+        do { file = File(targetDir, randomName(extension)) } while (file.exists())
 
         return file
     }
@@ -105,10 +104,8 @@ class YoutubeDownloader private constructor(
         fun createWithoutInit(
             database: Database, threads: Int = DEFAULT_THREADS,
             targetDir: File = DEFAULT_TARGET_DIR,
-            workingDir: File = DEFAULT_WORKING_DIR
-        ): YoutubeDownloader {
-            return YoutubeDownloader(database, threads, targetDir, workingDir)
-        }
+            workingDir: File = DEFAULT_WORKING_DIR): YoutubeDownloader
+                = YoutubeDownloader(database, threads, targetDir, workingDir)
 
         /** Create a new downloader, loading old jobs from the database. */
         @JvmStatic
@@ -144,11 +141,8 @@ fun downloadYoutube(url: String, target: File, workDir: File): YoutubeMetadata {
 
     val meta: YoutubeMetadata
     val timeTaken = measureTimeMillis {
-        val (exitCode, output, errOutput) = runCommand(
-            workDir, listOf(
-                "youtube-dl", "-x", "--audio-format", FORMAT, "--print-json", "--id", "--no-playlist", url
-            )
-        )
+        val (exitCode, output, errOutput) = runCommand(workDir,
+            listOf("youtube-dl", "-x", "--audio-format", FORMAT, "--print-json", "--id", "--no-playlist", url))
 
         // If the program failed due to a non-zero exit code,exit immediately.
         if (exitCode != 0) throw CommandRunException("Non-zero exit code: $errOutput")
@@ -208,7 +202,7 @@ private fun runCommand(workDir: File, command: List<String>): CommandRunResult {
             val output = inputStream.bufferedReader().readText()
             val err = errorStream.bufferedReader().readText()
             // TODO: Pass as function argument for configurability.
-            waitFor(2, TimeUnit.MINUTES)
+            waitFor(DEFAULT_WAIT_TIME_MINS, TimeUnit.MINUTES)
 
             return CommandRunResult(exitValue(), output, err)
         }
