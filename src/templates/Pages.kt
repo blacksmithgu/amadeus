@@ -78,10 +78,25 @@ fun DefaultTemplate.roomPage(player: String, room: String) {
                 }
             }
             div(classes = "row h-100 justify-content-center align-items-center") {
-                audio {
-                    controls = true
+                div(classes = "col") {
+                    div(classes = "row justify-content-center align-items-center") {
+                        audio {
+                            controls = true
+                        }
+                        button(type = ButtonType.button, classes = "btn btn-primary") { +"Next Song" }
+                    }
+                    div(classes = "row justify-content-center align-items-center") {
+                        form(classes = "form-inline") {
+                            input(classes = "form-control") {
+                                type = InputType.text
+                                id = "inputGuess"
+                                name = "guess"
+                                placeholder = "Guess"
+                            }
+                            button(classes = "btn btn-primary") { +"Submit" }
+                        }
+                    }
                 }
-                button(type = ButtonType.button, classes = "btn btn-primary") { + "Next Song" }
             }
         }
     }
