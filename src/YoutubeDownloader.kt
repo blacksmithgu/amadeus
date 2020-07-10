@@ -1,17 +1,17 @@
 package io.meltec.amadeus
 
+import CommandRunException
 import kotlinx.serialization.json.*
 import measureTimeMillis
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
+import randomAlphanumeric
+import runCommand
 import java.io.File
 import java.io.IOException
 import java.time.LocalDateTime
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
-import java.util.concurrent.ThreadLocalRandom
-import java.util.concurrent.TimeUnit
-import kotlin.streams.asSequence
 
 /**
  * Full youtube song downloader; provides simple blocking methods for downloading Youtube songs from given URLS
@@ -36,7 +36,9 @@ private val DEFAULT_TARGET_DIR = File("songs")
 private val DEFAULT_WORKING_DIR = File("work/downloader")
 /** Default number of threads to use for the downloader. */
 private const val DEFAULT_THREADS = 4
-private const val DEFAULT_WAIT_TIME_MINS = 2L
+
+/** Metadata about a downloaded youtube file; this metadata may be incomplete for some youtube files. */
+data class YoutubeMetadata(val title: String?, val artist: String?, val album: String?, val thumbnailUrl: String?, val lengthSeconds: Int?, val filename: String)
 
 /**
  * A multi-threaded (and threadsafe) downloader which automatically downloads songs from download in the background;
@@ -80,22 +82,12 @@ class YoutubeDownloader private constructor(
     /** Create a name for a new song file. */
     private fun songFile(extension: String): File {
         var file: File
-        do { file = File(targetDir, randomName(extension)) } while (file.exists())
+        do { file = File(targetDir, randomAlphanumeric(SONG_NAME_LENGTH, suffix = ".$extension")) } while (file.exists())
 
         return file
     }
 
-    /** Generate a random [SONG_NAME_LENGTH]-length string from [SONG_CHARACTER_POOL]. */
-    private fun randomName(extension: String): String =
-        ThreadLocalRandom.current().ints(SONG_NAME_LENGTH.toLong(), 0, SONG_CHARACTER_POOL.size)
-            .asSequence()
-            .map(SONG_CHARACTER_POOL::get)
-            .joinToString("", postfix = ".$extension")
-
     companion object {
-        /** Available characters to name the song. */
-        private val SONG_CHARACTER_POOL = ('a'..'z') + ('A'..'Z') + ('0'..'9')
-
         /** The number of characters in the random song name. */
         private const val SONG_NAME_LENGTH = 24
 
@@ -141,8 +133,10 @@ fun downloadYoutube(url: String, target: File, workDir: File): YoutubeMetadata {
 
     val meta: YoutubeMetadata
     val timeTaken = measureTimeMillis {
-        val (exitCode, output, errOutput) = runCommand(workDir,
-            listOf("youtube-dl", "-x", "--audio-format", FORMAT, "--print-json", "--id", "--no-playlist", url))
+        val (exitCode, output, errOutput) = runCommand(
+            workDir,
+            listOf("youtube-dl", "-x", "--audio-format", FORMAT, "--print-json", "--id", "--no-playlist", url)
+        )
 
         // If the program failed due to a non-zero exit code,exit immediately.
         if (exitCode != 0) throw CommandRunException("Non-zero exit code: $errOutput")
@@ -183,41 +177,3 @@ fun downloadYoutube(url: String, target: File, workDir: File): YoutubeMetadata {
     return meta
 }
 
-/** Utility method which runs a command with the given arguments and work directory. */
-private fun runCommand(workDir: File, command: List<String>): CommandRunResult {
-    log.debug("Running command '{}'", command.joinToString(" "))
-
-    val proc = try {
-        ProcessBuilder(command)
-            .directory(workDir)
-            .redirectOutput(ProcessBuilder.Redirect.PIPE)
-            .redirectError(ProcessBuilder.Redirect.PIPE)
-            .start()
-    } catch (ex: IOException) {
-        throw CommandNotFoundException("Failed to start command: $command", ex)
-    }
-
-    try {
-        proc.run {
-            val output = inputStream.bufferedReader().readText()
-            val err = errorStream.bufferedReader().readText()
-            // TODO: Pass as function argument for configurability.
-            waitFor(DEFAULT_WAIT_TIME_MINS, TimeUnit.MINUTES)
-
-            return CommandRunResult(exitValue(), output, err)
-        }
-    } catch (ex: IOException) {
-        throw CommandRunException("Command failed to run: $command", ex)
-    }
-}
-
-/** Metadata about a downloaded youtube file; this metadata may be incomplete for some youtube files. */
-data class YoutubeMetadata(val title: String?, val artist: String?, val album: String?, val thumbnailUrl: String?, val lengthSeconds: Int?, val filename: String)
-
-/** Result of running the raw youtube-dl executable; returns raw text. */
-data class CommandRunResult(val exitCode: Int, val output: String, val errOutput: String)
-
-/** An invocation of youtube-dl failed with some specific exception. */
-open class CommandRunException(reason: String, underlying: Exception? = null) : Exception(reason, underlying)
-/** YoutubeDl does not appear to be installed. */
-class CommandNotFoundException(reason: String, underlying: Exception? = null) : CommandRunException(reason, underlying)

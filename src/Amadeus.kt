@@ -4,7 +4,10 @@ import io.ktor.application.*
 import io.ktor.features.*
 import io.ktor.html.respondHtmlTemplate
 import io.ktor.http.*
-import io.ktor.http.cio.websocket.*
+import io.ktor.http.cio.websocket.CloseReason
+import io.ktor.http.cio.websocket.close
+import io.ktor.http.cio.websocket.pingPeriod
+import io.ktor.http.cio.websocket.timeout
 import io.ktor.http.content.CachingOptions
 import io.ktor.http.content.resources
 import io.ktor.http.content.static
@@ -24,24 +27,20 @@ import io.ktor.websocket.WebSockets
 import io.ktor.websocket.webSocket
 import io.meltec.amadeus.templates.*
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.channels.consumeEach
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonConfiguration
 import org.slf4j.event.Level
 import java.time.Duration
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.CopyOnWriteArrayList
-import kotlin.contracts.ExperimentalContracts
-import kotlin.contracts.contract
 
 /**
  * Central application information and metadata.
  */
 @OptIn(KtorExperimentalLocationsAPI::class)
 class Amadeus(val database: Database, val downloader: YoutubeDownloader) {
+    /** Maps active player sessions to the nicknames of the player. */
     private val playerNames = ConcurrentHashMap<PlayerSession, String>()
-    internal val rooms = ConcurrentHashMap<String, MutableList<PlayerSession>>()
+
+    /** Thread/coroutine-safe map of room IDs (names) to the rooms. */
+    internal val rooms = ConcurrentHashMap<String, Room>()
 
     /** Convenience function which configures the given application with Amadeus routes. */
     fun configure(app: Application, testing: Boolean) = app.amadeus(testing)
@@ -115,7 +114,7 @@ class Amadeus(val database: Database, val downloader: YoutubeDownloader) {
         install(WebSockets) {
             pingPeriod = Duration.ofSeconds(15)
             timeout = Duration.ofSeconds(15)
-            maxFrameSize = 1024 * 1024 // 1MB
+            maxFrameSize = 4 * 1024 * 1024 // 4MB
             masking = false
         }
 
@@ -130,7 +129,6 @@ class Amadeus(val database: Database, val downloader: YoutubeDownloader) {
         // Enable the use of sessions to keep information between requests of the browser.
         install(Sessions) {
             cookie<PlayerSession>("SESSION")
-            cookie<JoinRoomSession>("JOIN_ROOM")
         }
 
         // Enable the use of locations, a type safe way to create routes
@@ -152,13 +150,12 @@ class Amadeus(val database: Database, val downloader: YoutubeDownloader) {
 
             // Shows all active youtube downloads (completed and queued), as well as a form for submitting new ones.
             get<Root.YoutubeDl> {
-                val queued = database.allQueuedDownloads()
-                val completed = database.allCompletedDownloads()
                 call.respondHtmlTemplate(DefaultTemplate()) {
-                    youtubeStatusPage(completed, queued)
+                    youtubeStatusPage(database.allCompletedDownloads(), database.allQueuedDownloads())
                 }
             }
 
+            // Allows for queueing of multiple youtube URLs on the youtube downloader.
             post<Root.YoutubeDl> {
                 // TODO: Need a JSON format for proper errors.
                 val urls = call.receiveParameters()["urls"] ?: run {
@@ -167,10 +164,10 @@ class Amadeus(val database: Database, val downloader: YoutubeDownloader) {
                 }
 
                 for (url in urls.lines()) downloader.queue(url)
-                call.respondRedirect("/youtube-dl")
+                respondRedirect(Root.YoutubeDl())
             }
 
-            // Register a name to the current session so that players can identify each other
+            // Register a name to the current session so that players can identify each other.
             post<Root.Register> {
                 ensureSession { session ->
                     call.receiveParameters()["displayName"]?.let {
@@ -182,18 +179,13 @@ class Amadeus(val database: Database, val downloader: YoutubeDownloader) {
                 respondRedirect(Root())
             }
 
+            // Obtain a list of active rooms, or create a room.
             get<Root.Rooms> {
                 ensureSession { session ->
                     // Display a list of rooms
                     playerNames[session]?.let {
-                        // Redirect if the player had tried joining a room earlier
-                        call.sessions.get<JoinRoomSession>()?.let {
-                            respondRedirect(Root.Rooms.Room(it.id))
-                            return@get
-                        }
-                        // Display the rooms
                         call.respondHtmlTemplate(DefaultTemplate()) {
-                            roomsPage(listOf("a", "b", "c", "d", "e", "f", "g"))
+                            roomsPage(rooms.values.toList())
                         }
                         return@get
                     }
@@ -201,45 +193,46 @@ class Amadeus(val database: Database, val downloader: YoutubeDownloader) {
                 respondRedirect(Root())
             }
 
+            // The 'big' call - serves the actual room itself.
             get<Root.Rooms.Room> { roomRequest ->
-                ensureSession { session ->
-                    // Join a specific room, this page will create a WebSocket for game communication
-                    call.sessions.clear<JoinRoomSession>()
-                    playerNames[session]?.let {
-                        call.respondHtmlTemplate(DefaultTemplate()) {
-                            roomPage(it, roomRequest.id)
-                        }
-                        return@get
-                    }
-                    // Before redirecting to the landing page, remember the room they tried joining
-                    call.sessions.set(JoinRoomSession(call.parameters["id"] ?: ""))
+                val session = call.sessions.get<PlayerSession>() ?: kotlin.run {
+                    respondRedirect(Root())
+                    return@get
                 }
-                respondRedirect(Root())
+
+                // User has a session but has not registered yet.
+                // TODO: Make this a generic check for most paths.
+                if (playerName(session) == null) {
+                    respondRedirect(Root())
+                    return@get
+                }
+
+                // TODO: We shouldn't create a new room on a GET call, but I'm doing it anyway.
+                val room = rooms.computeIfAbsent(roomRequest.id) { Room(it, this@Amadeus) }
+
+                // Join a specific room, this page will create a WebSocket for game communication
+                call.respondHtmlTemplate(DefaultTemplate()) {
+                    roomPage(roomRequest.id)
+                }
             }.webSocket {
-                call.sessions.get<PlayerSession>()?.let {
-                    val json = Json(JsonConfiguration.Stable)
-                    val room = call.parameters["id"]
-                    if (!joinRoom(room, it)) {
-                        close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "Cannot join room"))
-                        return@webSocket
-                    }
-                    try {
-                        incoming.consumeEach { frame ->
-                            if (frame is Frame.Text) {
-                                json.parse(Command.serializer(), frame.readText()).run {
-                                    when (commandType) {
-                                        CommandType.START -> {
-                                            send("Welcome!")
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } finally {
-                        leaveRoom(room, it)
-                    }
+                val session = call.sessions.get<PlayerSession>() ?: kotlin.run {
+                    close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "No player session found; please log in"))
+                    return@webSocket
                 }
-                close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "No session"))
+
+                val roomId = call.parameters["id"] ?: kotlin.run {
+                    close(CloseReason(CloseReason.Codes.INTERNAL_ERROR, "Expected a room ID in request, but got nothing"))
+                    return@webSocket
+                }
+
+                val room = rooms.get(roomId) ?: kotlin.run {
+                    close(CloseReason(CloseReason.Codes.CANNOT_ACCEPT, "Invalid room ID $roomId; there is no such room!"))
+                    return@webSocket
+                }
+
+                // Pass off to the room to handle the player; if this function returns, then the web socket will
+                // close (since we do not do anything else here).
+                room.handlePlayer(session, this)
             }
 
             // Directly serve anything in resources/static to the root directory if previous dynamic paths fail.
@@ -249,26 +242,16 @@ class Amadeus(val database: Database, val downloader: YoutubeDownloader) {
         }
     }
 
+    /** Get the name of the player associated with the given session, if present. */
+    fun playerName(session: PlayerSession): String? = playerNames[session]
+
     private inline fun PipelineContext<Unit, ApplicationCall>.ensureSession(block: (PlayerSession) -> Unit) {
         call.sessions.get<PlayerSession>()?.let { block(it) }
     }
 
+    /** A form of redirect which allows for passing location objects (i.e., typed redirects). */
     private suspend inline fun PipelineContext<Unit, ApplicationCall>.respondRedirect(location: Any) {
         call.respondRedirect(href(location))
-    }
-
-    private fun leaveRoom(room: String, playerSession: PlayerSession) {
-        rooms[room]?.remove(playerSession)
-    }
-}
-
-@OptIn(ExperimentalContracts::class)
-private fun Amadeus.joinRoom(room: String?, playerSession: PlayerSession): Boolean {
-    contract {
-        returns(true) implies (room != null)
-    }
-    return rooms.computeIfAbsent(room ?: return false) { CopyOnWriteArrayList() }.run {
-        !contains(playerSession).also { if (it) add(playerSession) }
     }
 }
 
@@ -276,11 +259,6 @@ private fun Amadeus.joinRoom(room: String?, playerSession: PlayerSession): Boole
  * A player session identified by a unique nonce ID.
  */
 inline class PlayerSession(val id: String)
-
-/**
- * Used to redirect the player back to a room if they didn't have a name.
- */
-inline class JoinRoomSession(val id: String)
 
 /** Root of the typed routing table. */
 @OptIn(KtorExperimentalLocationsAPI::class)
@@ -302,10 +280,3 @@ class Root {
         data class Room(val id: String)
     }
 }
-
-enum class CommandType {
-    START,
-}
-
-@Serializable
-data class Command(val commandType: CommandType)

@@ -5,6 +5,7 @@ import io.ktor.html.Template
 import io.ktor.html.insert
 import io.meltec.amadeus.CompletedYoutubeDownload
 import io.meltec.amadeus.QueuedYoutubeDownload
+import io.meltec.amadeus.Room
 import kotlinx.html.*
 
 class DefaultTemplate : Template<HTML> {
@@ -42,7 +43,8 @@ fun DefaultTemplate.registrationPage() {
     }
 }
 
-fun DefaultTemplate.roomsPage(rooms: List<String>) {
+// TODO: Make this much more generic instead of taking heavyweight room objects.
+fun DefaultTemplate.roomsPage(rooms: List<Room>) {
     content {
         container {
             row {
@@ -51,9 +53,9 @@ fun DefaultTemplate.roomsPage(rooms: List<String>) {
                         card {
                             classes += setOf("mt-4", "shadow-sm")
                             cardBody {
-                                h5(classes = "card-title") { +room }
+                                h5(classes = "card-title") { text(room.id) }
                                 p(classes = "card-text") {
-                                    +"Some utterly useless example text to confuse the player even more and take up space"
+                                    text("${room.numPlayers()}/${room.config.maxPlayers} players")
                                 }
                                 a(href = "/room/$room", classes = "btn btn-primary float-right") {
                                     +"Join"
@@ -67,9 +69,9 @@ fun DefaultTemplate.roomsPage(rooms: List<String>) {
     }
 }
 
-fun DefaultTemplate.roomPage(player: String, room: String) {
+fun DefaultTemplate.roomPage(room: String) {
     content {
-        h1 { +"$player joined room $room" }
+        h1 { +"Room '$room'" }
         div(classes = "container-fluid h-100") {
             div(classes = "row justify-content-center align-items-center") {
                 button(type = ButtonType.button, classes = "btn btn-lg btn-primary") {
@@ -99,6 +101,8 @@ fun DefaultTemplate.roomPage(player: String, room: String) {
                 }
             }
         }
+
+        script(type = "text/javascript", src = "/js/game.js") { }
     }
 }
 
