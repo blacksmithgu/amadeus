@@ -232,7 +232,7 @@ class Amadeus(val database: Database, val downloader: YoutubeDownloader) {
 
                 // Pass off to the room to handle the player; if this function returns, then the web socket will
                 // close (since we do not do anything else here).
-                room.handlePlayer(session, this)
+                room.handleConnection(session, this)
             }
 
             // Directly serve anything in resources/static to the root directory if previous dynamic paths fail.

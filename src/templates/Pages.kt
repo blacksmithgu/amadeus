@@ -55,9 +55,9 @@ fun DefaultTemplate.roomsPage(rooms: List<Room>) {
                             cardBody {
                                 h5(classes = "card-title") { text(room.id) }
                                 p(classes = "card-text") {
-                                    text("${room.numPlayers()}/${room.config.maxPlayers} players")
+                                    text("${room.status.players.size}/${room.config.maxPlayers} players")
                                 }
-                                a(href = "/room/$room", classes = "btn btn-primary float-right") {
+                                a(href = "/room/${room.id}", classes = "btn btn-primary float-right") {
                                     +"Join"
                                 }
                             }
