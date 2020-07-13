@@ -196,7 +196,7 @@ class Room(val id: String, val server: Amadeus) {
         val scores = HashMap<String, Int>()
 
         // Now we have a quiz, and we can move into actually playing the game.
-        for (round in 0.until(quiz.questions.size)) {
+        for (round in quiz.questions.indices) {
             val question = quiz.questions[round]
             val songData = question.song.readBytes()
 
@@ -268,7 +268,7 @@ class Room(val id: String, val server: Amadeus) {
             val roundTimeMs = (config.guessTime + config.playTime) * 1000L
             val ticker = ticker(roundTimeMs, roundTimeMs, scope.coroutineContext)
             scope.launch {
-                val useless = ticker.receive()
+                ticker.receive()
                 controller.send(RoomMessage.RoundTimeout(round))
             }
 
