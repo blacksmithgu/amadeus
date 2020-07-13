@@ -6,10 +6,44 @@ import io.ktor.html.insert
 import io.meltec.amadeus.CompletedYoutubeDownload
 import io.meltec.amadeus.QueuedYoutubeDownload
 import io.meltec.amadeus.Room
-import kotlinx.html.*
+import kotlinx.html.ButtonType
+import kotlinx.html.FormMethod
+import kotlinx.html.HTML
+import kotlinx.html.HtmlBlockTag
+import kotlinx.html.InputType
+import kotlinx.html.ThScope
+import kotlinx.html.a
+import kotlinx.html.audio
+import kotlinx.html.body
+import kotlinx.html.button
+import kotlinx.html.classes
+import kotlinx.html.div
+import kotlinx.html.form
+import kotlinx.html.h1
+import kotlinx.html.h5
+import kotlinx.html.head
+import kotlinx.html.id
+import kotlinx.html.input
+import kotlinx.html.label
+import kotlinx.html.meta
+import kotlinx.html.onClick
+import kotlinx.html.p
+import kotlinx.html.script
+import kotlinx.html.style
+import kotlinx.html.styleLink
+import kotlinx.html.table
+import kotlinx.html.tbody
+import kotlinx.html.td
+import kotlinx.html.textArea
+import kotlinx.html.th
+import kotlinx.html.thead
+import kotlinx.html.title
+import kotlinx.html.tr
 
+/** Default template containing the main css and js for Amadeus. */
 class DefaultTemplate : Template<HTML> {
-    val content = Placeholder<HtmlBlockTag>()
+    /** The content of the page. Inserted into the body tag. */
+    val content: Placeholder<HtmlBlockTag> = Placeholder()
     override fun HTML.apply() {
         head {
             title("Amadeus")
@@ -76,7 +110,7 @@ fun DefaultTemplate.roomPage(room: String) {
             div(classes = "row justify-content-center align-items-center") {
                 button(type = ButtonType.button, classes = "btn btn-lg btn-primary") {
                     onClick = "console.log(\"Play the first song\")"
-                    + "Start Game"
+                    +"Start Game"
                 }
             }
             div(classes = "row h-100 justify-content-center align-items-center") {
@@ -138,11 +172,11 @@ fun DefaultTemplate.youtubeStatusPage(completed: List<CompletedYoutubeDownload>,
                     }
                 }
                 tbody {
-                    for (download in queued) {
+                    for ((id, url, requestTime) in queued) {
                         tr {
-                            th(scope = ThScope.row) { text(download.id) }
-                            td { +download.url }
-                            td { +download.requestTime.toString() }
+                            th(scope = ThScope.row) { text(id) }
+                            td { +url }
+                            td { +requestTime.toString() }
                             td(classes = "text-right") {
                                 button(classes = "btn btn-danger") { +"Cancel" }
                             }
@@ -162,7 +196,7 @@ fun DefaultTemplate.youtubeStatusPage(completed: List<CompletedYoutubeDownload>,
                         th(scope = ThScope.col) { +"Request Time" }
                         th(scope = ThScope.col) { +"Complete Time" }
                         th(scope = ThScope.col) { +"Title/Error" }
-                        th(scope = ThScope.col, classes="text-center") {
+                        th(scope = ThScope.col, classes = "text-center") {
                             style = "width: 1px;"
                             +"Actions"
                         }
@@ -176,7 +210,7 @@ fun DefaultTemplate.youtubeStatusPage(completed: List<CompletedYoutubeDownload>,
                             td { +download.requestTime.toString() }
                             td { +download.completedTime.toString() }
                             td {
-                                when(download) {
+                                when (download) {
                                     is CompletedYoutubeDownload.Success -> +(download.meta.title ?: "<unknown>")
                                     is CompletedYoutubeDownload.Error -> +download.reason
                                 }

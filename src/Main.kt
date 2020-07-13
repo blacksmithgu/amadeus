@@ -7,14 +7,18 @@ import org.slf4j.LoggerFactory
 import org.sqlite.SQLiteConfig
 import java.util.regex.Pattern
 
+/** Configures Amadeus. */
 fun Application.server() {
     val log = LoggerFactory.getLogger("main")
 
     // TODO: Some basic build automation around the application ID and user version - useful for automatic upgrades!
-    val database = Database.sqlite("amadeus.db", SQLiteConfig().apply {
-        enableRecursiveTriggers(true)
-        enforceForeignKeys(true)
-    })
+    val database = Database.sqlite(
+        "amadeus.db",
+        SQLiteConfig().apply {
+            enableRecursiveTriggers(true)
+            enforceForeignKeys(true)
+        }
+    )
 
     // TODO: Implement database migrations/updates.
     if (!database.initialized()) {
@@ -23,7 +27,7 @@ fun Application.server() {
 
         // Sqlite doesn't support multiple commands in one statement, so split by semicolon and execute them one
         // at a time. Wonderful. This is pretty hacky.
-        var commands = schema.split(Pattern.compile(";\r?\n"))
+        val commands = schema.split(Pattern.compile(";\r?\n"))
         for (command in commands) {
             if (command.trim().isEmpty()) continue
             database.withJooq { it.execute(command.trim() + ";") }
@@ -36,7 +40,8 @@ fun Application.server() {
     Amadeus(database, YoutubeDownloader.create(database)).configure(this, true)
 }
 
-fun main(args: Array<String>) {
+/** Starts Amadeus. */
+fun main() {
     embeddedServer(Netty, watchPaths = listOf("amadeus/build"), port = 8080, module = Application::server)
         .start(wait = true)
 }

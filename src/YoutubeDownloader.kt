@@ -1,7 +1,11 @@
 package io.meltec.amadeus
 
 import CommandRunException
-import kotlinx.serialization.json.*
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonConfiguration
+import kotlinx.serialization.json.JsonException
+import kotlinx.serialization.json.content
+import kotlinx.serialization.json.int
 import measureTimeMillis
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
@@ -32,13 +36,23 @@ private const val FORMAT: String = "mp3"
 
 /** Default target directory to store songs in. */
 private val DEFAULT_TARGET_DIR = File("songs")
+
 /** Default working directory that downloads occur in. */
 private val DEFAULT_WORKING_DIR = File("work/downloader")
+
 /** Default number of threads to use for the downloader. */
 private const val DEFAULT_THREADS = 4
 
+// TODO: Mark serializable
 /** Metadata about a downloaded youtube file; this metadata may be incomplete for some youtube files. */
-data class YoutubeMetadata(val title: String?, val artist: String?, val album: String?, val thumbnailUrl: String?, val lengthSeconds: Int?, val filename: String)
+data class YoutubeMetadata(
+    val title: String?,
+    val artist: String?,
+    val album: String?,
+    val thumbnailUrl: String?,
+    val lengthSeconds: Int?,
+    val filename: String
+)
 
 /**
  * A multi-threaded (and threadsafe) downloader which automatically downloads songs from download in the background;
@@ -54,7 +68,7 @@ class YoutubeDownloader private constructor(
     val executor: Executor = Executors.newFixedThreadPool(threads)
 
     /** Queue a URL to be downloaded; this will add the queue request to the database and queue it in the download thread pool. */
-    fun queue(url: String) = database.newQueuedDownload(url, LocalDateTime.now()).also {
+    fun queue(url: String): QueuedYoutubeDownload = database.newQueuedDownload(url, LocalDateTime.now()).also {
         executor.execute { execDownload(it) }
     }
 
@@ -82,7 +96,9 @@ class YoutubeDownloader private constructor(
     /** Create a name for a new song file. */
     private fun songFile(extension: String): File {
         var file: File
-        do { file = File(targetDir, randomAlphanumeric(SONG_NAME_LENGTH, suffix = ".$extension")) } while (file.exists())
+        do {
+            file = File(targetDir, randomAlphanumeric(SONG_NAME_LENGTH, suffix = ".$extension"))
+        } while (file.exists())
 
         return file
     }
@@ -94,20 +110,30 @@ class YoutubeDownloader private constructor(
         /** Create a new downloader without loading old jobs from the database. */
         @JvmStatic
         fun createWithoutInit(
-            database: Database, threads: Int = DEFAULT_THREADS,
+            database: Database,
+            threads: Int = DEFAULT_THREADS,
             targetDir: File = DEFAULT_TARGET_DIR,
-            workingDir: File = DEFAULT_WORKING_DIR): YoutubeDownloader
-                = YoutubeDownloader(database, threads, targetDir, workingDir)
+            workingDir: File = DEFAULT_WORKING_DIR
+        ): YoutubeDownloader =
+            YoutubeDownloader(database, threads, targetDir, workingDir)
 
         /** Create a new downloader, loading old jobs from the database. */
         @JvmStatic
-        fun create(database: Database, threads: Int = DEFAULT_THREADS,
-                   targetDir: File = DEFAULT_TARGET_DIR,
-                   workingDir: File = DEFAULT_WORKING_DIR): YoutubeDownloader {
+        fun create(
+            database: Database,
+            threads: Int = DEFAULT_THREADS,
+            targetDir: File = DEFAULT_TARGET_DIR,
+            workingDir: File = DEFAULT_WORKING_DIR
+        ): YoutubeDownloader {
             val downloader = YoutubeDownloader(database, threads, targetDir, workingDir)
 
             // Clear old working directory.
-            workingDir.takeIf(File::exists)?.run { try { deleteRecursively() } catch (ex: IOException) { } }
+            workingDir.takeIf(File::exists)?.run {
+                try {
+                    deleteRecursively()
+                } catch (ex: IOException) {
+                }
+            }
 
             // Re-queue old queued jobs which were not finished.
             val jobs = database.allQueuedDownloads()
@@ -171,9 +197,10 @@ fun downloadYoutube(url: String, target: File, workDir: File): YoutubeMetadata {
         )
     }
 
-    log.info("Downloaded '{}' from '{}' to file '{}' (working dir '{}', {}s)",
-        meta.title ?: url, url, target, workDir, timeTaken / 1000.0)
+    log.info(
+        "Downloaded '{}' from '{}' to file '{}' (working dir '{}', {}s)",
+        meta.title ?: url, url, target, workDir, timeTaken / 1000.0
+    )
 
     return meta
 }
-

@@ -34,7 +34,7 @@ socket.addEventListener("message", function(event) {
             source.connect(audioContext.destination)
             audioBuffers[expectedAudioRound] = source
             bufferComplete(expectedAudioRound)
-            console.log("Recieved audio for round " + expectedAudioRound)
+            console.log("Received audio for round " + expectedAudioRound)
         }, function(error) {
             console.log(error)
         })

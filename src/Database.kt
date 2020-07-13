@@ -3,8 +3,16 @@ package io.meltec.amadeus
 import org.jooq.DSLContext
 import org.jooq.RecordMapper
 import org.jooq.SQLDialect
-import org.jooq.generated.Tables.*
-import org.jooq.generated.tables.records.*
+import org.jooq.generated.Tables.COMPLETED_SONG_DOWNLOADS
+import org.jooq.generated.Tables.QUEUED_SONG_DOWNLOADS
+import org.jooq.generated.Tables.SONGS
+import org.jooq.generated.Tables.SONGS_SOURCES
+import org.jooq.generated.Tables.SOURCES
+import org.jooq.generated.tables.records.CompletedSongDownloadsRecord
+import org.jooq.generated.tables.records.QueuedSongDownloadsRecord
+import org.jooq.generated.tables.records.SongsRecord
+import org.jooq.generated.tables.records.SongsSourcesRecord
+import org.jooq.generated.tables.records.SourcesRecord
 import org.jooq.impl.DSL
 import org.sqlite.SQLiteConfig
 import java.sql.Connection
@@ -17,19 +25,14 @@ import java.time.LocalDateTime
  * A simple wrapper for a database (currently Sqlite) which provides ways to easily obtain a Connection, a jooq DSL
  * context, or directly query objects directly.
  */
-class Database {
+class Database private constructor(
+    /** The filename of the sqlite database. */
+    filename: String,
     /** The sqlite configuration to use for generating connections. */
     private val config: SQLiteConfig
-    /** The filename of the sqlite database. */
-    private val filename: String
+) {
     /** The full JDBC path to the database. Computed field from the filename. */
-    private val jdbcString: String
-
-    private constructor(filename: String, config: SQLiteConfig) {
-        this.filename = filename
-        this.config = config
-        this.jdbcString = "jdbc:sqlite:$filename"
-    }
+    private val jdbcString: String = "jdbc:sqlite:$filename"
 
     /** Determines if this database has been initialized by querying if any tables exist. */
     fun initialized(): Boolean = withJooq { it.meta().tables.size > 0 }
@@ -41,13 +44,13 @@ class Database {
      * Create a new connection to this database (using the internal connection configuration)
      * It is recommended to use [withConnection]
      */
-    fun connection(): Connection = config.createConnection(this.jdbcString)
+    private fun connection(): Connection = config.createConnection(this.jdbcString)
 
     /**
      * Run the given lambda with a connection, potentially reusing connections from a connection pool.
      * Do not retain a reference to this connection.
      */
-    fun<T> withConnection(func: (conn: Connection) -> T): T {
+    private fun <T> withConnection(func: (conn: Connection) -> T): T {
         return func(connection())
     }
 
@@ -55,7 +58,7 @@ class Database {
      * Run the given lambda with a jooq DSL context which is already connected to the database. Do not retain a
      * reference to this context.
      */
-    fun<T> withJooq(func: (context: DSLContext) -> T): T {
+    fun <T> withJooq(func: (context: DSLContext) -> T): T {
         return func(DSL.using(connection(), SQLDialect.SQLITE))
     }
 
@@ -71,6 +74,7 @@ class Database {
 
     // Song-Sources
 
+    /** Select all song-source pairs from the database. */
     fun allSongSources(): List<SongSource> = withJooq { it.selectFrom(SONGS_SOURCES).fetch(SONG_SOURCE_MAPPER) }
 
     // Queued Downloads
@@ -87,7 +91,7 @@ class Database {
     }
 
     /** Delete a queued download with the given ID. */
-    fun deleteQueuedDownload(id: Int) = withJooq {
+    fun deleteQueuedDownload(id: Int): Int = withJooq {
         it.deleteFrom(QUEUED_SONG_DOWNLOADS)
             .where(QUEUED_SONG_DOWNLOADS.ID.eq(id))
             .execute()
@@ -103,10 +107,12 @@ class Database {
     /**
      * Create a new successful completed download in the database.
      */
-    fun newSuccessfulCompletedDownload(url: String,
-                                       requestTime: LocalDateTime,
-                                       completeTime: LocalDateTime,
-                                       meta: YoutubeMetadata): CompletedYoutubeDownload = withJooq {
+    fun newSuccessfulCompletedDownload(
+        url: String,
+        requestTime: LocalDateTime,
+        completeTime: LocalDateTime,
+        meta: YoutubeMetadata
+    ): CompletedYoutubeDownload = withJooq {
         val record = it.insertInto(COMPLETED_SONG_DOWNLOADS)
             .set(COMPLETED_SONG_DOWNLOADS.URL, url)
             .set(COMPLETED_SONG_DOWNLOADS.REQUEST_TIME, requestTime)
@@ -126,10 +132,12 @@ class Database {
     /**
      * Create a new failed completed download in the database.
      */
-    fun newFailedCompletedDownload(url: String,
-                                   requestTime: LocalDateTime,
-                                   completeTime: LocalDateTime,
-                                   error: String): CompletedYoutubeDownload = withJooq {
+    fun newFailedCompletedDownload(
+        url: String,
+        requestTime: LocalDateTime,
+        completeTime: LocalDateTime,
+        error: String
+    ): CompletedYoutubeDownload = withJooq {
         val record = it.insertInto(COMPLETED_SONG_DOWNLOADS)
             .set(COMPLETED_SONG_DOWNLOADS.URL, url)
             .set(COMPLETED_SONG_DOWNLOADS.REQUEST_TIME, requestTime)
@@ -157,7 +165,14 @@ class Database {
 
 /** Maps SongRecords to Song objects. */
 val SONG_MAPPER: RecordMapper<SongsRecord, Song> = RecordMapper { record: SongsRecord ->
-    Song(record.id, record.name, record.uploadTime, SongOrigin.fromId(record.uploadOrigin), record.uploadDataSource, record.filename)
+    Song(
+        record.id,
+        record.name,
+        record.uploadTime,
+        SongOrigin.fromId(record.uploadOrigin),
+        record.uploadDataSource,
+        record.filename
+    )
 }
 
 /** Maps SourceRecords to Source objects. */
@@ -166,19 +181,35 @@ val SOURCE_MAPPER: RecordMapper<SourcesRecord, Source> = RecordMapper { record: 
 }
 
 /** Maps SongSourceRecords to SongSource objects. */
-val SONG_SOURCE_MAPPER: RecordMapper<SongsSourcesRecord, SongSource> = RecordMapper {  record: SongsSourcesRecord ->
+val SONG_SOURCE_MAPPER: RecordMapper<SongsSourcesRecord, SongSource> = RecordMapper { record: SongsSourcesRecord ->
     SongSource(record.songId, record.sourceId, record.type)
 }
 
 /** Maps completed download records in the database to CompletedYoutubeDownload objects. */
-val COMPLETED_RECORD_MAPPER: RecordMapper<CompletedSongDownloadsRecord, CompletedYoutubeDownload> = RecordMapper { record ->
-    if (record.error == null) {
-        CompletedYoutubeDownload.Success(record.id, record.url, record.requestTime, record.completedTime,
-            YoutubeMetadata(record.title, record.artist, record.album, record.thumbnailUrl, record.durationSeconds, record.filename))
-    } else {
-        CompletedYoutubeDownload.Error(record.id, record.url, record.requestTime, record.completedTime, record.error)
+val COMPLETED_RECORD_MAPPER: RecordMapper<CompletedSongDownloadsRecord, CompletedYoutubeDownload> =
+    RecordMapper { record ->
+        if (record.error == null) {
+            CompletedYoutubeDownload.Success(
+                record.id, record.url, record.requestTime, record.completedTime,
+                YoutubeMetadata(
+                    record.title,
+                    record.artist,
+                    record.album,
+                    record.thumbnailUrl,
+                    record.durationSeconds,
+                    record.filename
+                )
+            )
+        } else {
+            CompletedYoutubeDownload.Error(
+                record.id,
+                record.url,
+                record.requestTime,
+                record.completedTime,
+                record.error
+            )
+        }
     }
-}
 
 /** Maps queued downloads in the database to QueuedYoutubeDownload objects. */
 val QUEUED_RECORD_MAPPER: RecordMapper<QueuedSongDownloadsRecord, QueuedYoutubeDownload> = RecordMapper { record ->

@@ -1,11 +1,19 @@
 package io.meltec.amadeus
 
-import io.ktor.http.cio.websocket.*
+import io.ktor.http.cio.websocket.CloseReason
+import io.ktor.http.cio.websocket.Frame
+import io.ktor.http.cio.websocket.close
+import io.ktor.http.cio.websocket.readText
+import io.ktor.http.cio.websocket.send
 import io.ktor.websocket.WebSocketServerSession
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ObsoleteCoroutinesApi
 import kotlinx.coroutines.channels.ActorScope
 import kotlinx.coroutines.channels.actor
 import kotlinx.coroutines.channels.ticker
+import kotlinx.coroutines.launch
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -39,8 +47,8 @@ private val log: Logger = LoggerFactory.getLogger("room")
  *    buffering time for the next round.
  * 5. Steps 3 & 4 are repeated (with a much smaller buffering time due to pre-buffering).
  */
-@ObsoleteCoroutinesApi
-class Room(val id: String, val server: Amadeus) {
+@OptIn(ObsoleteCoroutinesApi::class)
+class Room(val id: String, private val server: Amadeus) {
     /** The time this room was first created. */
     val createdTime: LocalDateTime = LocalDateTime.now()
 
@@ -63,13 +71,13 @@ class Room(val id: String, val server: Amadeus) {
         private set
 
     /** The scope which all the coroutines for this room run in; allows for all of them to easily be canceled. */
-    val scope: CoroutineScope = CoroutineScope(Dispatchers.Default)
+    private val scope = CoroutineScope(Dispatchers.Default)
 
     /**
      * A lazily-started actor which controls all room state. This is the only coroutine which directly
      * operates on private room state (like players).
      */
-    val controller = scope.actor<RoomMessage> { runRoom() }
+    private val controller = scope.actor<RoomMessage> { runRoom() }
 
     /** Handle an incoming player connection with the given session and web socket. */
     suspend fun handleConnection(session: PlayerSession, socket: WebSocketServerSession) {
@@ -86,9 +94,10 @@ class Room(val id: String, val server: Amadeus) {
         // Otherwise, this web socket just endlessly waits for messages, attempts to decode them/interpret them,
         // and sends them to the controller.
         try {
-            outer@for (rawFrame in socket.incoming) {
+            outer@ for (rawFrame in socket.incoming) {
                 // The client should only ever send us JSON textual frames.
-                val frame = (rawFrame as? Frame.Text) ?: throw IllegalStateException("Recieved a binary websocket frame from a client")
+                val frame = (rawFrame as? Frame.Text)
+                    ?: throw IllegalStateException("Received a binary websocket frame from a client")
                 val parsed = try {
                     json.parse(ClientCommand.serializer(), frame.readText())
                 } catch (ex: Exception) {
@@ -101,7 +110,6 @@ class Room(val id: String, val server: Amadeus) {
                     is ClientCommand.Next -> RoomMessage.NextRound
                     is ClientCommand.BufferComplete -> RoomMessage.BufferComplete(session, parsed.round)
                     is ClientCommand.Guess -> RoomMessage.Guess(session, parsed.guess, parsed.round)
-                    else -> continue@outer
                 }
 
                 controller.send(message)
@@ -119,10 +127,10 @@ class Room(val id: String, val server: Amadeus) {
     // Private state of the room which is only visible to the controller.
 
     /** Local json object used in data serialization/deserialization. */
-    private val json: Json = Json(JsonConfiguration.Stable)
+    private val json = Json(JsonConfiguration.Stable)
 
     /** Map of players versus their current live websocket sessions. */
-    private val connectedPlayers: HashMap<PlayerSession, WebSocketServerSession> = HashMap()
+    private val connectedPlayers = HashMap<PlayerSession, WebSocketServerSession>()
 
     /** Main actor controller for this room; processes messages to keep the room moving along. */
     private suspend fun ActorScope<RoomMessage>.runRoom() {
@@ -131,46 +139,55 @@ class Room(val id: String, val server: Amadeus) {
 
         // LOBBY
         // We start in the lobby state, where we are just waiting for the 'Start' command.
-        lobby@for (message in this.channel) {
+        lobby@ for (message in this.channel) {
             genericMessageHandler(message, setOf(), newJoinsAllowed = true)
 
             when (message) {
                 is RoomMessage.Start -> break@lobby
-                is RoomMessage.IncomingConnection -> {
-                    // TODO: Cleanup this as a generic 'sendState' method.
+                is RoomMessage.IncomingConnection ->
                     try {
-                        message.socket.send(ServerCommand.RoomStat(RoomStatus(
-                            state = RoomState.LOBBY,
-                            round = null,
-                            players = connectedPlayers.keys.map {
-                                PlayerStatus(it.id, server.playerName(it) ?: it.id, true)
-                            })
-                        ))
-                    } catch(ex: Exception) { log.error("Failed to send room status", ex) }
-                }
+                        // TODO: Cleanup this as a generic 'sendState' method.
+                        message.socket.send(
+                            ServerCommand.RoomStat(
+                                RoomStatus(
+                                    state = RoomState.LOBBY,
+                                    round = null,
+                                    players = connectedPlayers.keys.map {
+                                        PlayerStatus(it.id, server.playerName(it) ?: it.id, true)
+                                    }
+                                )
+                            )
+                        )
+                    } catch (ex: Exception) {
+                        log.error("Failed to send room status", ex)
+                    }
             }
         }
 
         // The final set of players we will play this game with.
         val players = HashSet(connectedPlayers.keys)
 
-        // Asychronously generate the quiz.
-        var quiz: Quiz = Quiz(questions = listOf())
+        // Asynchronously generate the quiz.
+        lateinit var quiz: Quiz
         scope.launch {
             controller.send(RoomMessage.LoadingComplete(Quiz.darkSouls()))
         }
 
         // Notify all players of the new loading state.
-        broadcast(ServerCommand.RoomStat(RoomStatus(
-            state = RoomState.LOADING,
-            round = null,
-            players = connectedPlayers.keys.map {
-                PlayerStatus(it.id, server.playerName(it) ?: it.id, true)
-            })
-        ))
+        broadcast(
+            ServerCommand.RoomStat(
+                RoomStatus(
+                    state = RoomState.LOADING,
+                    round = null,
+                    players = connectedPlayers.keys.map {
+                        PlayerStatus(it.id, server.playerName(it) ?: it.id, true)
+                    }
+                )
+            )
+        )
 
         // We've started the game, queue up the background coroutine which loads the actual game and wait for it.
-        loading@for (message in this.channel) {
+        loading@ for (message in this.channel) {
             genericMessageHandler(message, players)
 
             when (message) {
@@ -178,18 +195,23 @@ class Room(val id: String, val server: Amadeus) {
                     quiz = message.quiz
                     break@loading
                 }
-                is RoomMessage.IncomingConnection -> {
-                    // TODO: Cleanup this as a generic 'sendState' method.
+                is RoomMessage.IncomingConnection ->
                     try {
-                        message.socket.send(ServerCommand.RoomStat(RoomStatus(
-                            state = RoomState.LOADING,
-                            round = null,
-                            players = connectedPlayers.keys.map {
-                                PlayerStatus(it.id, server.playerName(it) ?: it.id, true)
-                            })
-                        ))
-                    } catch(ex: Exception) { log.error("Failed to send room status", ex) }
-                }
+                        // TODO: Cleanup this as a generic 'sendState' method.
+                        message.socket.send(
+                            ServerCommand.RoomStat(
+                                RoomStatus(
+                                    state = RoomState.LOADING,
+                                    round = null,
+                                    players = connectedPlayers.keys.map {
+                                        PlayerStatus(it.id, server.playerName(it) ?: it.id, true)
+                                    }
+                                )
+                            )
+                        )
+                    } catch (ex: Exception) {
+                        log.error("Failed to send room status", ex)
+                    }
             }
         }
 
@@ -201,22 +223,31 @@ class Room(val id: String, val server: Amadeus) {
             val songData = question.song.readBytes()
 
             // Notify all players of the new buffering state.
-            broadcast(ServerCommand.RoomStat(RoomStatus(
-                state = RoomState.INGAME_BUFFERING,
-                round = RoundStatus(round, -1, "", setOf(), mapOf()),
-                players = connectedPlayers.keys.map {
-                    PlayerStatus(it.id, server.playerName(it) ?: it.id, true)
-                })
-            ))
+            broadcast(
+                ServerCommand.RoomStat(
+                    RoomStatus(
+                        state = RoomState.INGAME_BUFFERING,
+                        round = RoundStatus(round, -1, "", setOf(), mapOf()),
+                        players = connectedPlayers.keys.map {
+                            PlayerStatus(it.id, server.playerName(it) ?: it.id, true)
+                        }
+                    )
+                )
+            )
 
             // Send song information to everyone.
-            for ((player, socket) in connectedPlayers) {
+            for ((_, socket) in connectedPlayers) {
                 scope.launch {
                     try {
                         socket.send(ServerCommand.SongData(round, songData.size))
                         socket.send(songData)
                     } catch (ex: Exception) {
-                        socket.close(CloseReason(CloseReason.Codes.PROTOCOL_ERROR, "Failed to send song for round $round"))
+                        socket.close(
+                            CloseReason(
+                                CloseReason.Codes.PROTOCOL_ERROR,
+                                "Failed to send song for round $round"
+                            )
+                        )
                     }
                 }
             }
@@ -233,21 +264,26 @@ class Room(val id: String, val server: Amadeus) {
 
                         readyPlayers.add(message.session.id)
 
-                        val allPlayersReady = connectedPlayers.keys.all { readyPlayers.contains(it.id) }
+                        val allPlayersReady = connectedPlayers.keys.all { it.id in readyPlayers }
                         if (allPlayersReady) break@buffering
                     }
-                    is RoomMessage.IncomingConnection -> {
-                        // TODO: Cleanup this as a generic 'sendState' method.
+                    is RoomMessage.IncomingConnection ->
                         try {
-                            message.socket.send(ServerCommand.RoomStat(RoomStatus(
-                                state = RoomState.INGAME_BUFFERING,
-                                round = RoundStatus(round, -1, "", setOf(), mapOf()),
-                                players = connectedPlayers.keys.map {
-                                    PlayerStatus(it.id, server.playerName(it) ?: it.id, true)
-                                })
-                            ))
-                        } catch(ex: Exception) { log.error("Failed to send room status", ex) }
-                    }
+                            // TODO: Cleanup this as a generic 'sendState' method.
+                            message.socket.send(
+                                ServerCommand.RoomStat(
+                                    RoomStatus(
+                                        state = RoomState.INGAME_BUFFERING,
+                                        round = RoundStatus(round, -1, "", setOf(), mapOf()),
+                                        players = connectedPlayers.keys.map {
+                                            PlayerStatus(it.id, server.playerName(it) ?: it.id, true)
+                                        }
+                                    )
+                                )
+                            )
+                        } catch (ex: Exception) {
+                            log.error("Failed to send room status", ex)
+                        }
                 }
             }
 
@@ -256,13 +292,17 @@ class Room(val id: String, val server: Amadeus) {
             val roundStart = System.currentTimeMillis()
 
             // And notify players that we're actually starting the round...
-            broadcast(ServerCommand.RoomStat(RoomStatus(
-                state = RoomState.INGAME,
-                round = RoundStatus(round, roundStart, question.prompt, guesses.keys, scores),
-                players = connectedPlayers.keys.map {
-                    PlayerStatus(it.id, server.playerName(it) ?: it.id, true)
-                })
-            ))
+            broadcast(
+                ServerCommand.RoomStat(
+                    RoomStatus(
+                        state = RoomState.INGAME,
+                        round = RoundStatus(round, roundStart, question.prompt, guesses.keys, scores),
+                        players = connectedPlayers.keys.map {
+                            PlayerStatus(it.id, server.playerName(it) ?: it.id, true)
+                        }
+                    )
+                )
+            )
 
             // Countdown for when the round ends.
             val roundTimeMs = (config.guessTime + config.playTime) * 1000L
@@ -272,34 +312,39 @@ class Room(val id: String, val server: Amadeus) {
                 controller.send(RoomMessage.RoundTimeout(round))
             }
 
-            game@for (message in this.channel) {
+            game@ for (message in this.channel) {
                 genericMessageHandler(message, players)
 
                 when (message) {
                     is RoomMessage.NextRound -> break@game
-                    is RoomMessage.Guess -> if (message.round == round) guesses.put(message.session.id, message.guess)
+                    is RoomMessage.Guess -> if (message.round == round) guesses[message.session.id] = message.guess
                     is RoomMessage.RoundTimeout -> {
                         if (message.round != round) continue@game
                         break@game
                     }
-                    is RoomMessage.IncomingConnection -> {
-                        // TODO: Cleanup this as a generic 'sendState' method.
+                    is RoomMessage.IncomingConnection ->
                         try {
-                            message.socket.send(ServerCommand.RoomStat(RoomStatus(
-                                state = RoomState.INGAME,
-                                round = RoundStatus(round, roundStart, question.prompt, guesses.keys, scores),
-                                players = connectedPlayers.keys.map {
-                                    PlayerStatus(it.id, server.playerName(it) ?: it.id, true)
-                                })
-                            ))
-                        } catch(ex: Exception) { log.error("Failed to send room status", ex) }
-                    }
+                            // TODO: Cleanup this as a generic 'sendState' method.
+                            message.socket.send(
+                                ServerCommand.RoomStat(
+                                    RoomStatus(
+                                        state = RoomState.INGAME,
+                                        round = RoundStatus(round, roundStart, question.prompt, guesses.keys, scores),
+                                        players = connectedPlayers.keys.map {
+                                            PlayerStatus(it.id, server.playerName(it) ?: it.id, true)
+                                        }
+                                    )
+                                )
+                            )
+                        } catch (ex: Exception) {
+                            log.error("Failed to send room status", ex)
+                        }
                 }
             }
 
             // Go through guesses and give points to any correct guesses.
             for ((player, guess) in guesses) {
-                if (isAnswerCloseEnough(question.answer, guess)) scores.compute(player) { _, score -> (score ?: 0) + 1 }
+                if (isAnswerCloseEnough(question.solution, guess)) scores.compute(player) { _, score -> (score ?: 0) + 1 }
             }
 
             // Cancel the ticker, no point in it spamming us.
@@ -307,30 +352,39 @@ class Room(val id: String, val server: Amadeus) {
         }
 
         // Notify players that we are in the final state.
-        broadcast(ServerCommand.RoomStat(RoomStatus(
-            state = RoomState.FINISHED,
-            round = null,
-            players = connectedPlayers.keys.map {
-                PlayerStatus(it.id, server.playerName(it) ?: it.id, true)
-            })
-        ))
+        broadcast(
+            ServerCommand.RoomStat(
+                RoomStatus(
+                    state = RoomState.FINISHED,
+                    round = null,
+                    players = connectedPlayers.keys.map {
+                        PlayerStatus(it.id, server.playerName(it) ?: it.id, true)
+                    }
+                )
+            )
+        )
 
         // Finally, transition to the FINAL state, where we just sit here and do nothing.
-        final@for (message in this.channel) {
+        final@ for (message in this.channel) {
             genericMessageHandler(message, players)
 
             when (message) {
-                is RoomMessage.IncomingConnection -> {
-                    // TODO: Cleanup this as a generic 'sendState' method.
+                is RoomMessage.IncomingConnection ->
                     try {
-                        message.socket.send(ServerCommand.RoomStat(RoomStatus(
-                            state = RoomState.FINISHED,
-                            round = null,
-                            players = connectedPlayers.keys.map {
-                                PlayerStatus(it.id, server.playerName(it) ?: it.id, true)
-                            })))
-                    } catch (ex: Exception) { }
-                }
+                        // TODO: Cleanup this as a generic 'sendState' method.
+                        message.socket.send(
+                            ServerCommand.RoomStat(
+                                RoomStatus(
+                                    state = RoomState.FINISHED,
+                                    round = null,
+                                    players = connectedPlayers.keys.map {
+                                        PlayerStatus(it.id, server.playerName(it) ?: it.id, true)
+                                    }
+                                )
+                            )
+                        )
+                    } catch (ex: Exception) {
+                    }
                 is RoomMessage.ClosedConnection -> if (connectedPlayers.size == 0) break@final
             }
         }
@@ -339,28 +393,41 @@ class Room(val id: String, val server: Amadeus) {
     }
 
     /** Utility method called by the main actor to handle generic messages, like joins/leaves. */
-    private suspend fun genericMessageHandler(message: RoomMessage, players: Set<PlayerSession>, newJoinsAllowed: Boolean = false) {
+    private suspend fun genericMessageHandler(
+        message: RoomMessage,
+        players: Set<PlayerSession>,
+        newJoinsAllowed: Boolean = false
+    ) {
         when (message) {
             is RoomMessage.IncomingConnection -> {
                 // Connections only allowed if the room is accepting players and there is space... OR if this is a rejoin.
-                val connectionAllowed = connectedPlayers.containsKey(message.session)
-                        || players.contains(message.session)
-                        || (newJoinsAllowed && players.size < config.maxPlayers)
+                val connectionAllowed =
+                    connectedPlayers.containsKey(message.session) || players.contains(message.session) || (newJoinsAllowed && players.size < config.maxPlayers)
                 if (!connectionAllowed) {
-                    log.debug("An incoming connection from '{}' (name '{}') was rejected for room '{}'",
-                        message.session.id, server.playerName(message.session) ?: "<unknown>", this@Room.id)
-                    message.result.complete(CloseReason(CloseReason.Codes.CANNOT_ACCEPT, "This room is full or not accepting new players"))
+                    log.debug(
+                        "An incoming connection from '{}' (name '{}') was rejected for room '{}'",
+                        message.session.id, server.playerName(message.session) ?: "<unknown>", this@Room.id
+                    )
+                    message.result.complete(
+                        CloseReason(
+                            CloseReason.Codes.CANNOT_ACCEPT,
+                            "This room is full or not accepting new players"
+                        )
+                    )
                     return
                 }
 
                 // Update the connected player map, closing the previous player socket if one exists.
-                // TODO: Launch a child coroutine for doing the closing, but don't propogate errors.
-                connectedPlayers.put(message.session, message.socket)?.let {
-                    it.close(CloseReason(CloseReason.Codes.GOING_AWAY, "Only one websocket per user allowed for this room"))
-                }
+                // TODO: Launch a child coroutine for doing the closing, but don't propagate errors.
+                connectedPlayers.put(message.session, message.socket)?.close(
+                    CloseReason(
+                        CloseReason.Codes.GOING_AWAY,
+                        "Only one websocket per user allowed for this room"
+                    )
+                )
 
                 // Return that the connection was successful back to the caller; at this point,
-                // we can start recieving messages.
+                // we can start receiving messages.
                 message.result.complete(null)
 
                 // Send this player the room configuration; each room state will send any further config information,
@@ -368,12 +435,18 @@ class Room(val id: String, val server: Amadeus) {
                 try {
                     message.socket.send(ServerCommand.RoomConfig(config))
                 } catch (ex: Exception) {
-                    message.socket.close(CloseReason(CloseReason.Codes.PROTOCOL_ERROR, "Failed to initialize client state"))
+                    message.socket.close(
+                        CloseReason(
+                            CloseReason.Codes.PROTOCOL_ERROR,
+                            "Failed to initialize client state"
+                        )
+                    )
                     return
                 }
 
                 // Notify other users that this user has joined.
-                val playerStatus = PlayerStatus(message.session.id, server.playerName(message.session) ?: message.session.id, true)
+                val playerStatus =
+                    PlayerStatus(message.session.id, server.playerName(message.session) ?: message.session.id, true)
                 broadcast(ServerCommand.PlayerJoined(playerStatus), exclude = message.session)
             }
             is RoomMessage.ClosedConnection -> {
@@ -393,7 +466,11 @@ class Room(val id: String, val server: Amadeus) {
     private suspend fun broadcast(command: ServerCommand, exclude: PlayerSession? = null) {
         for ((player, socket) in connectedPlayers) {
             if (player == exclude) continue
-            try { socket.send(command) } catch(ex: Exception) { log.error("Error during broadcast: ", ex) }
+            try {
+                socket.send(command)
+            } catch (ex: Exception) {
+                log.error("Error during broadcast: ", ex)
+            }
         }
     }
 
@@ -403,9 +480,9 @@ class Room(val id: String, val server: Amadeus) {
     }
 }
 
-///////////////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////////////
 // JSON-serializable room state which is exposed to the rest of the server and clients.
-///////////////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////////////
 
 // TODO: Change from seconds to milliseconds, probably.
 /**
@@ -415,11 +492,27 @@ class Room(val id: String, val server: Amadeus) {
  * This class is serializable, and is sent over the wire as JSON to clients.
  */
 @Serializable
-data class RoomConfiguration(val playTime: Int = 20, val guessTime: Int = 10, val rounds: Int = 20, val maxPlayers: Int = 8)
+data class RoomConfiguration(
+    /** The number of seconds to play a song for. */
+    val playTime: Int = 20,
+    /** The number of seconds allowed for guessing. */
+    val guessTime: Int = 10,
+    /** The number of rounds to play. */
+    val rounds: Int = 20,
+    /** The maximum number of players allowed to join the room. */
+    val maxPlayers: Int = 8
+)
 
 /** The current status of a player in the game; just gives basic name and host information, as well as score. */
 @Serializable
-data class PlayerStatus(val id: String, val name: String, val host: Boolean)
+data class PlayerStatus(
+    /** The id of the player. */
+    val id: String,
+    /** The name of the player. */
+    val name: String,
+    /** Whether the player is host or not. */
+    val host: Boolean
+)
 
 // TODO: I used a Unix epoch because I'm too lazy to figure out how to use ZonedDateTimes. Fix this so we avoid crashing in 2038 :(
 /**
@@ -427,8 +520,18 @@ data class PlayerStatus(val id: String, val name: String, val host: Boolean)
  * as well as the guessing status of any players.
  */
 @Serializable
-data class RoundStatus(val round: Int, val roundStart: Long, val prompt: String, val guessed: Set<String>,
-    val points: Map<String, Int>)
+data class RoundStatus(
+    /** The current round. */
+    val round: Int,
+    /** When the current round started. */
+    val roundStart: Long,
+    /** The prompt for the current round. */
+    val prompt: String,
+    /** The player guesses in the current round. */
+    val guessed: Set<String>,
+    /** The player's points in the current round. */
+    val points: Map<String, Int>
+)
 
 /**
  * The different possible states that the room can be in; the room will generally linearly transition from one state
@@ -442,11 +545,18 @@ enum class RoomState { LOBBY, LOADING, INGAME, INGAME_BUFFERING, FINISHED }
  * how many players are currently
  */
 @Serializable
-data class RoomStatus(val state: RoomState = RoomState.LOBBY, val round: RoundStatus? = null, val players: List<PlayerStatus> = listOf())
+data class RoomStatus(
+    /** The current state of the room. */
+    val state: RoomState = RoomState.LOBBY,
+    /** The current round. */
+    val round: RoundStatus? = null,
+    /** The list of players in the room. */
+    val players: List<PlayerStatus> = listOf()
+)
 
-/////////////////////////////////////////////////////////
+// ///////////////////////////////////////////////////////
 // Websocket protocol interchange format (JSON-based). //
-/////////////////////////////////////////////////////////
+// ///////////////////////////////////////////////////////
 
 @Serializable
 sealed class ClientCommand {
@@ -460,7 +570,7 @@ sealed class ClientCommand {
 
     @Serializable
     @SerialName("BUFFER_COMPLETE")
-    data class BufferComplete(val round: Int): ClientCommand()
+    data class BufferComplete(val round: Int) : ClientCommand()
 
     @Serializable
     @SerialName("GUESS")
@@ -476,7 +586,7 @@ sealed class ServerCommand {
 
     @Serializable
     @SerialName("PLAYER_JOINED")
-    data class PlayerJoined(val player: PlayerStatus): ServerCommand()
+    data class PlayerJoined(val player: PlayerStatus) : ServerCommand()
 
     @Serializable
     @SerialName("ROOM_CONFIG")
@@ -491,30 +601,50 @@ sealed class ServerCommand {
     data class SongData(val round: Int, val sizeBytes: Int) : ServerCommand()
 }
 
-//////////////////////////////////
-// Room actor control messages. //
-//////////////////////////////////
-
+/** Room actor control messages. */
 sealed class RoomMessage {
 
     // Server-originating commands.
 
     /** A new incoming connection to this room is occurring. */
-    data class IncomingConnection(val session: PlayerSession, val socket: WebSocketServerSession, val result: CompletableDeferred<CloseReason?>) : RoomMessage()
+    data class IncomingConnection(
+        /** The player who this connection is from. */
+        val session: PlayerSession,
+        /** The websocket represented by this connection. */
+        val socket: WebSocketServerSession,
+        /** TODO: What is this? */
+        val result: CompletableDeferred<CloseReason?>
+    ) : RoomMessage()
 
     /** An existing connection to this room is closing. */
-    data class ClosedConnection(val session: PlayerSession, val socket: WebSocketServerSession) : RoomMessage()
+    data class ClosedConnection(
+        /** The player who this connection is from. */
+        val session: PlayerSession,
+        /** The websocket represented by this connection. */
+        val socket: WebSocketServerSession
+    ) : RoomMessage()
 
     /** Loading is complete, and we should move to the next state. */
-    data class LoadingComplete(val quiz: Quiz) : RoomMessage()
+    data class LoadingComplete(
+        /** The quiz which has finished loading. */
+        val quiz: Quiz
+    ) : RoomMessage()
 
     /** The round timer has been reached, so it should be ended forcibly. */
-    data class RoundTimeout(val round: Int) : RoomMessage()
+    data class RoundTimeout(
+        /** The round which has been timed out. */
+        val round: Int
+    ) : RoomMessage()
 
     // Client-based commands.
 
     /** The client has finished buffering up to the given round. */
-    data class BufferComplete(val session: PlayerSession, val round: Int) : RoomMessage()
+    data class BufferComplete(
+        /** The player who has finished buffering. */
+        val session: PlayerSession,
+        /** The round the player finished buffering. */
+        val round: Int
+    ) : RoomMessage()
 
     /** The client is making the given guess for the given round (if the round is not the active round, it is ignored). */
     data class Guess(val session: PlayerSession, val guess: String, val round: Int) : RoomMessage()

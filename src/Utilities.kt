@@ -21,7 +21,6 @@ fun randomAlphanumeric(length: Int, suffix: String = ""): String =
         .map(SONG_CHARACTER_POOL::get)
         .joinToString("", postfix = suffix)
 
-
 /** Utility method which runs a command with the given arguments and work directory. */
 fun runCommand(workDir: File, command: List<String>): CommandRunResult {
     commandLog.debug("Running command '{}'", command.joinToString(" "))

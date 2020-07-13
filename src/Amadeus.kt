@@ -1,9 +1,28 @@
 package io.meltec.amadeus
 
-import io.ktor.application.*
-import io.ktor.features.*
+import io.ktor.application.Application
+import io.ktor.application.ApplicationCall
+import io.ktor.application.ApplicationCallPipeline
+import io.ktor.application.call
+import io.ktor.application.install
+import io.ktor.features.AutoHeadResponse
+import io.ktor.features.CORS
+import io.ktor.features.CachingHeaders
+import io.ktor.features.CallLogging
+import io.ktor.features.Compression
+import io.ktor.features.ContentNegotiation
+import io.ktor.features.DataConversion
+import io.ktor.features.HttpsRedirect
+import io.ktor.features.StatusPages
+import io.ktor.features.deflate
+import io.ktor.features.gzip
+import io.ktor.features.minimumSize
 import io.ktor.html.respondHtmlTemplate
-import io.ktor.http.*
+import io.ktor.http.CacheControl
+import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
+import io.ktor.http.HttpStatusCode
 import io.ktor.http.cio.websocket.CloseReason
 import io.ktor.http.cio.websocket.close
 import io.ktor.http.cio.websocket.pingPeriod
@@ -11,39 +30,53 @@ import io.ktor.http.cio.websocket.timeout
 import io.ktor.http.content.CachingOptions
 import io.ktor.http.content.resources
 import io.ktor.http.content.static
-import io.ktor.locations.*
+import io.ktor.locations.KtorExperimentalLocationsAPI
+import io.ktor.locations.Location
+import io.ktor.locations.Locations
+import io.ktor.locations.get
+import io.ktor.locations.href
+import io.ktor.locations.post
 import io.ktor.request.path
 import io.ktor.request.receiveParameters
 import io.ktor.response.respond
 import io.ktor.response.respondRedirect
 import io.ktor.routing.routing
 import io.ktor.serialization.json
-import io.ktor.sessions.*
+import io.ktor.sessions.Sessions
+import io.ktor.sessions.cookie
+import io.ktor.sessions.get
+import io.ktor.sessions.getOrSet
+import io.ktor.sessions.sessions
 import io.ktor.util.KtorExperimentalAPI
 import io.ktor.util.date.GMTDate
 import io.ktor.util.generateNonce
 import io.ktor.util.pipeline.PipelineContext
 import io.ktor.websocket.WebSockets
-import io.ktor.websocket.webSocket
-import io.meltec.amadeus.templates.*
+import io.meltec.amadeus.templates.DefaultTemplate
+import io.meltec.amadeus.templates.registrationPage
+import io.meltec.amadeus.templates.roomPage
+import io.meltec.amadeus.templates.roomsPage
+import io.meltec.amadeus.templates.youtubeStatusPage
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import org.slf4j.event.Level
+import webSocket
 import java.time.Duration
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.collections.set
 
 /**
  * Central application information and metadata.
  */
 @OptIn(KtorExperimentalLocationsAPI::class)
-class Amadeus(val database: Database, val downloader: YoutubeDownloader) {
+class Amadeus(private val database: Database, private val downloader: YoutubeDownloader) {
     /** Maps active player sessions to the nicknames of the player. */
     private val playerNames = ConcurrentHashMap<PlayerSession, String>()
 
     /** Thread/coroutine-safe map of room IDs (names) to the rooms. */
-    internal val rooms = ConcurrentHashMap<String, Room>()
+    private val rooms = ConcurrentHashMap<String, Room>()
 
     /** Convenience function which configures the given application with Amadeus routes. */
-    fun configure(app: Application, testing: Boolean) = app.amadeus(testing)
+    fun configure(app: Application, testing: Boolean): Unit = app.amadeus(testing)
 
     /**
      * Configuration function on application which configures amadeus routes. The `this` in this function is
@@ -194,7 +227,7 @@ class Amadeus(val database: Database, val downloader: YoutubeDownloader) {
             }
 
             // The 'big' call - serves the actual room itself.
-            get<Root.Rooms.Room> { roomRequest ->
+            get<Root.Rooms.Room> { (id) ->
                 val session = call.sessions.get<PlayerSession>() ?: kotlin.run {
                     respondRedirect(Root())
                     return@get
@@ -208,25 +241,27 @@ class Amadeus(val database: Database, val downloader: YoutubeDownloader) {
                 }
 
                 // TODO: We shouldn't create a new room on a GET call, but I'm doing it anyway.
-                val room = rooms.computeIfAbsent(roomRequest.id) { Room(it, this@Amadeus) }
+                rooms.computeIfAbsent(id) { Room(it, this@Amadeus) }
 
                 // Join a specific room, this page will create a WebSocket for game communication
                 call.respondHtmlTemplate(DefaultTemplate()) {
-                    roomPage(roomRequest.id)
+                    roomPage(id)
                 }
-            }.webSocket {
+            }
+
+            webSocket<Root.Rooms.Room> { (id) ->
                 val session = call.sessions.get<PlayerSession>() ?: kotlin.run {
                     close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "No player session found; please log in"))
                     return@webSocket
                 }
 
-                val roomId = call.parameters["id"] ?: kotlin.run {
-                    close(CloseReason(CloseReason.Codes.INTERNAL_ERROR, "Expected a room ID in request, but got nothing"))
-                    return@webSocket
-                }
-
-                val room = rooms.get(roomId) ?: kotlin.run {
-                    close(CloseReason(CloseReason.Codes.CANNOT_ACCEPT, "Invalid room ID $roomId; there is no such room!"))
+                val room = rooms[id] ?: kotlin.run {
+                    close(
+                        CloseReason(
+                            CloseReason.Codes.CANNOT_ACCEPT,
+                            "Invalid room ID $id; there is no such room!"
+                        )
+                    )
                     return@webSocket
                 }
 
@@ -255,10 +290,11 @@ class Amadeus(val database: Database, val downloader: YoutubeDownloader) {
     }
 }
 
-/**
- * A player session identified by a unique nonce ID.
- */
-inline class PlayerSession(val id: String)
+/** A player session identified by a unique nonce ID. */
+inline class PlayerSession(
+    /** The unique id for this session. */
+    val id: String
+)
 
 /** Root of the typed routing table. */
 @OptIn(KtorExperimentalLocationsAPI::class)
@@ -277,6 +313,9 @@ class Root {
     class Rooms {
         /** Route for a specific room with the given id. */
         @Location("{id}")
-        data class Room(val id: String)
+        data class Room(
+            /** The id for the specific room. */
+            val id: String
+        )
     }
 }
