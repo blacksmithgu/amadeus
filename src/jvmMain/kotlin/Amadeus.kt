@@ -273,6 +273,7 @@ class Amadeus(private val database: Database, private val downloader: YoutubeDow
             // Directly serve anything in resources/static to the root directory if previous dynamic paths fail.
             static {
                 resources("static")
+                resources("")
             }
         }
     }

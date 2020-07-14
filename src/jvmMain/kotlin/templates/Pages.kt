@@ -52,6 +52,7 @@ class DefaultTemplate : Template<HTML> {
         }
         body {
             insert(content)
+            script(type = "text/javascript", src = "/amadeus.js") { }
         }
     }
 }

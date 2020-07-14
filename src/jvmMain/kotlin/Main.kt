@@ -42,6 +42,6 @@ fun Application.server() {
 
 /** Starts Amadeus. */
 fun main() {
-    embeddedServer(Netty, watchPaths = listOf("amadeus/build"), port = 8080, module = Application::server)
+    embeddedServer(Netty, port = 8080, module = Application::server)
         .start(wait = true)
 }
