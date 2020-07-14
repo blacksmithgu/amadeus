@@ -1,25 +1,19 @@
 package io.meltec.amadeus
 
-import io.ktor.http.cio.websocket.CloseReason
-import io.ktor.http.cio.websocket.Frame
-import io.ktor.http.cio.websocket.close
-import io.ktor.http.cio.websocket.readText
-import io.ktor.http.cio.websocket.send
+import io.ktor.http.cio.websocket.*
 import io.ktor.websocket.WebSocketServerSession
-import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ObsoleteCoroutinesApi
+import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.ActorScope
+import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.actor
 import kotlinx.coroutines.channels.ticker
-import kotlinx.coroutines.launch
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonConfiguration
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
+import java.net.URL
 import java.time.LocalDateTime
 
 private val log: Logger = LoggerFactory.getLogger("room")
@@ -57,7 +51,7 @@ class Room(val id: String, private val server: Amadeus) {
      * status without interacting with the room controller, this is a public, readonly volatile field.
      */
     @Volatile
-    var config: RoomConfiguration = RoomConfiguration(rounds = 5)
+    var config: RoomConfiguration = RoomConfiguration()
         private set
 
     /**
@@ -67,7 +61,7 @@ class Room(val id: String, private val server: Amadeus) {
      * This status may be several seconds out of date - it is updated occasionally by the room controller.
      */
     @Volatile
-    var status: RoomStatus = RoomStatus()
+    var status: RoomStatus = RoomStatus.Lobby(listOf())
         private set
 
     /** The scope which all the coroutines for this room run in; allows for all of them to easily be canceled. */
@@ -121,7 +115,7 @@ class Room(val id: String, private val server: Amadeus) {
             log.error("Error during operation of websocket for user '${session.id}':", ex)
         }
 
-        // Is it possible to reach here without having sent the closed connection message? Hmm.
+        // TODO: Is it possible to reach here without having sent the closed connection message? Hmm.
     }
 
     // Private state of the room which is only visible to the controller.
@@ -134,268 +128,216 @@ class Room(val id: String, private val server: Amadeus) {
 
     /** Main actor controller for this room; processes messages to keep the room moving along. */
     private suspend fun ActorScope<RoomMessage>.runRoom() {
-        // This is a little bit of black magic, but we can implement the entirety of the room logic using a single
-        // procedural function with the magic of actors and background coroutines.
+        // This is a little bit of black magic, but we can implement the full room logic in a procedural function
+        // (with some nice utility functions for each state) using the magic of coroutines. Cool.
+        val (config, players) = lobby()
+        val quiz = loading(config, players)
+        val scores = game(quiz, players)
+        finished(quiz, scores, players)
+    }
 
-        // LOBBY
-        // We start in the lobby state, where we are just waiting for the 'Start' command.
-        lobby@ for (message in this.channel) {
-            genericMessageHandler(message, setOf(), newJoinsAllowed = true)
+    /** Result of the lobby stage of the game. */
+    private data class LobbyResult(val config: RoomConfiguration, val players: Set<PlayerSession>)
 
+    /** Lobby function which executes the lobby state; returns the final room config and player set. */
+    private suspend fun ActorScope<RoomMessage>.lobby(): LobbyResult {
+        fun state() = RoomStatus.Lobby(connectedPlayerInfo())
+
+        outer@ for (message in this.channel) {
+            genericMessageHandler(message, setOf(), { state() }, true)
+
+            // Break when the game start is requested; nothing else to do in the lobby.
             when (message) {
-                is RoomMessage.Start -> break@lobby
-                is RoomMessage.IncomingConnection ->
-                    try {
-                        // TODO: Cleanup this as a generic 'sendState' method.
-                        message.socket.send(
-                            ServerCommand.RoomStat(
-                                RoomStatus(
-                                    state = RoomState.LOBBY,
-                                    round = null,
-                                    players = connectedPlayers.keys.map {
-                                        PlayerStatus(it.id, server.playerName(it) ?: it.id, true)
-                                    }
-                                )
-                            )
-                        )
-                    } catch (ex: Exception) {
-                        log.error("Failed to send room status", ex)
-                    }
+                is RoomMessage.Start -> break@outer
             }
         }
 
-        // The final set of players we will play this game with.
-        val players = HashSet(connectedPlayers.keys)
+        return LobbyResult(this@Room.config, HashSet(this@Room.connectedPlayers.keys))
+    }
 
-        // Asynchronously generate the quiz.
-        lateinit var quiz: Quiz
+    /** Loading function which asynchronously generates the quiz that will be played. */
+    private suspend fun ActorScope<RoomMessage>.loading(config: RoomConfiguration, players: Set<PlayerSession>): Quiz {
+        fun state() = RoomStatus.Loading(connectedPlayerInfo())
+
+        // Immediately kick off the background coroutines which generate the actual quiz.
         scope.launch {
             controller.send(RoomMessage.LoadingComplete(Quiz.darkSouls()))
         }
 
-        // Notify all players of the new loading state.
-        broadcast(
-            ServerCommand.RoomStat(
-                RoomStatus(
-                    state = RoomState.LOADING,
-                    round = null,
-                    players = connectedPlayers.keys.map {
-                        PlayerStatus(it.id, server.playerName(it) ?: it.id, true)
-                    }
-                )
-            )
-        )
+        // Notify users we are in the loading state.
+        broadcast(ServerCommand.RoomStat(state()))
 
-        // We've started the game, queue up the background coroutine which loads the actual game and wait for it.
-        loading@ for (message in this.channel) {
-            genericMessageHandler(message, players)
+        outer@ for (message in this.channel) {
+            genericMessageHandler(message, players, { state() })
 
             when (message) {
-                is RoomMessage.LoadingComplete -> {
-                    quiz = message.quiz
-                    break@loading
-                }
-                is RoomMessage.IncomingConnection ->
-                    try {
-                        // TODO: Cleanup this as a generic 'sendState' method.
-                        message.socket.send(
-                            ServerCommand.RoomStat(
-                                RoomStatus(
-                                    state = RoomState.LOADING,
-                                    round = null,
-                                    players = connectedPlayers.keys.map {
-                                        PlayerStatus(it.id, server.playerName(it) ?: it.id, true)
-                                    }
-                                )
-                            )
-                        )
-                    } catch (ex: Exception) {
-                        log.error("Failed to send room status", ex)
-                    }
+                is RoomMessage.LoadingComplete -> return message.quiz
             }
         }
 
+        // This will only be reached on cancellation, so we can return whatever here.
+        return Quiz(listOf())
+    }
+
+    /** Game function which plays the actual game; returns the final scores. */
+    private suspend fun ActorScope<RoomMessage>.game(quiz: Quiz, players: Set<PlayerSession>): Map<String, Int> {
+        if (quiz.questions.isEmpty()) return HashMap()
+
+        // Shared buffer status which lets us know what round clients have buffered up to.
+        // TODO: This buffer status should be (ID, Socket).
+        val bufferStatus = HashMap<String, MutableSet<Int>>()
+
+        // Scores for each player.
         val scores = HashMap<String, Int>()
 
-        // Now we have a quiz, and we can move into actually playing the game.
+        // Immediately start buffering the first song.
+        startBuffering(0, quiz.questions[0].song)
+
+        // Iterate for each round, swapping between the 'buffer', 'play', and 'postplay' states.
         for (round in quiz.questions.indices) {
+            // BUFFER
+
+            // TODO: Timeout any players who buffer for too long.
+            fun bufferState() = RoomStatus.Buffering(round, bufferStatus.filter { round in it.value }.keys, scores, connectedPlayerInfo())
+
+            // Broadcast we are in the buffer state, and buffer if necessary.
+            broadcast(ServerCommand.RoomStat(bufferState()))
+            if (!connectedPlayers.keys.all { round in bufferStatus.getOrDefault(it.id, HashSet()) }) {
+                buffering@ for (message in this.channel) {
+                    genericMessageHandler(message, players, { bufferState() })
+                    when (message) {
+                        is RoomMessage.IncomingConnection -> startBuffering(round, quiz.questions[round].song, message.socket)
+                        is RoomMessage.ClosedConnection -> bufferStatus.remove(message.session.id) // TODO: Errorprone, fix this.
+                        is RoomMessage.BufferComplete -> {
+                            bufferStatus.computeIfAbsent(message.session.id) { HashSet() }.add(message.round)
+
+                            val allReady = connectedPlayers.keys.all { round in bufferStatus.getOrDefault(it.id, HashSet()) }
+                            if (allReady) break@buffering
+                            else broadcast(ServerCommand.RoomStat(bufferState()))
+                        }
+                    }
+                }
+            }
+
+            // Start buffering the next song while gameplay is ongoing.
+            if (round + 1 <= quiz.questions.size - 1) startBuffering(round + 1, quiz.questions[round + 1].song)
+
+            // PLAY
+
+            val startTime = System.currentTimeMillis()
             val question = quiz.questions[round]
-            val songData = question.song.readBytes()
-
-            // Notify all players of the new buffering state.
-            broadcast(
-                ServerCommand.RoomStat(
-                    RoomStatus(
-                        state = RoomState.INGAME_BUFFERING,
-                        round = RoundStatus(round, -1, "", setOf(), mapOf()),
-                        players = connectedPlayers.keys.map {
-                            PlayerStatus(it.id, server.playerName(it) ?: it.id, true)
-                        }
-                    )
-                )
-            )
-
-            // Send song information to everyone.
-            for ((_, socket) in connectedPlayers) {
-                scope.launch {
-                    try {
-                        socket.send(ServerCommand.SongData(round, songData.size))
-                        socket.send(songData)
-                    } catch (ex: Exception) {
-                        socket.close(
-                            CloseReason(
-                                CloseReason.Codes.PROTOCOL_ERROR,
-                                "Failed to send song for round $round"
-                            )
-                        )
-                    }
-                }
-            }
-
-            val readyPlayers = HashSet<String>()
-
-            // And wait until we get the buffered data back.
-            buffering@ for (message in this.channel) {
-                genericMessageHandler(message, players)
-
-                when (message) {
-                    is RoomMessage.BufferComplete -> {
-                        if (message.round != round) continue@buffering
-
-                        readyPlayers.add(message.session.id)
-
-                        val allPlayersReady = connectedPlayers.keys.all { it.id in readyPlayers }
-                        if (allPlayersReady) break@buffering
-                    }
-                    is RoomMessage.IncomingConnection ->
-                        try {
-                            // TODO: Cleanup this as a generic 'sendState' method.
-                            message.socket.send(
-                                ServerCommand.RoomStat(
-                                    RoomStatus(
-                                        state = RoomState.INGAME_BUFFERING,
-                                        round = RoundStatus(round, -1, "", setOf(), mapOf()),
-                                        players = connectedPlayers.keys.map {
-                                            PlayerStatus(it.id, server.playerName(it) ?: it.id, true)
-                                        }
-                                    )
-                                )
-                            )
-                        } catch (ex: Exception) {
-                            log.error("Failed to send room status", ex)
-                        }
-                }
-            }
-
-            // Alright, well everyone is buffered now, so let's actually play the round.
             val guesses = HashMap<String, String>()
-            val roundStart = System.currentTimeMillis()
 
-            // And notify players that we're actually starting the round...
-            broadcast(
-                ServerCommand.RoomStat(
-                    RoomStatus(
-                        state = RoomState.INGAME,
-                        round = RoundStatus(round, roundStart, question.prompt, guesses.keys, scores),
-                        players = connectedPlayers.keys.map {
-                            PlayerStatus(it.id, server.playerName(it) ?: it.id, true)
-                        }
-                    )
-                )
-            )
+            fun playState() = RoomStatus.Playing(round, startTime, question.prompt, guesses.keys, scores, connectedPlayerInfo())
+            broadcast(ServerCommand.RoomStat(playState()))
 
-            // Countdown for when the round ends.
-            val roundTimeMs = (config.guessTime + config.playTime) * 1000L
-            val ticker = ticker(roundTimeMs, roundTimeMs, scope.coroutineContext)
-            scope.launch {
-                ticker.receive()
+            // Set up a timeout so we know when the round ends.
+            val playTimeout = timeout((config.guessTime + config.playTime) * 1000L) {
                 controller.send(RoomMessage.RoundTimeout(round))
             }
 
-            game@ for (message in this.channel) {
-                genericMessageHandler(message, players)
-
+            playing@ for (message in this.channel) {
+                genericMessageHandler(message, players, { playState() })
                 when (message) {
-                    is RoomMessage.NextRound -> break@game
-                    is RoomMessage.Guess -> if (message.round == round) guesses[message.session.id] = message.guess
-                    is RoomMessage.RoundTimeout -> {
-                        if (message.round != round) continue@game
-                        break@game
+                    is RoomMessage.IncomingConnection -> {
+                        if (round <= quiz.questions.size - 1)
+                            startBuffering(round + 1, quiz.questions[round + 1].song, message.socket)
                     }
-                    is RoomMessage.IncomingConnection ->
-                        try {
-                            // TODO: Cleanup this as a generic 'sendState' method.
-                            message.socket.send(
-                                ServerCommand.RoomStat(
-                                    RoomStatus(
-                                        state = RoomState.INGAME,
-                                        round = RoundStatus(round, roundStart, question.prompt, guesses.keys, scores),
-                                        players = connectedPlayers.keys.map {
-                                            PlayerStatus(it.id, server.playerName(it) ?: it.id, true)
-                                        }
-                                    )
-                                )
-                            )
-                        } catch (ex: Exception) {
-                            log.error("Failed to send room status", ex)
-                        }
+                    is RoomMessage.BufferComplete -> bufferStatus.computeIfAbsent(message.session.id) { HashSet() }.add(message.round)
+                    is RoomMessage.ClosedConnection -> bufferStatus.remove(message.session.id) // TODO: Errorprone, fix this.
+                    is RoomMessage.Guess -> {
+                        guesses[message.session.id] = message.guess
+                        broadcast(ServerCommand.RoomStat(playState()))
+                    }
+                    is RoomMessage.NextRound -> break@playing
+                    is RoomMessage.RoundTimeout -> break@playing
                 }
             }
 
-            // Go through guesses and give points to any correct guesses.
-            for ((player, guess) in guesses) {
-                if (isAnswerCloseEnough(question.solution, guess)) scores.compute(player) { _, score -> (score ?: 0) + 1 }
+            playTimeout.cancel()
+
+            // Give points to players who scored.
+            for ((playerId, guess) in guesses) {
+                if (isAnswerCloseEnough(question.solution, guess))
+                    scores.compute(playerId) { _, score -> (score ?: 0) + 1 }
             }
 
-            // Cancel the ticker, no point in it spamming us.
-            ticker.cancel()
+            // REVIEW
+            // Transition to the review state for a fixed amount of time.
+            fun reviewState() = RoomStatus.Reviewing(round, question.prompt, question.solution, guesses, scores, connectedPlayerInfo())
+            broadcast(ServerCommand.RoomStat(reviewState()))
+
+            val reviewTimeout = timeout(config.reviewTime * 1000L) {
+                controller.send(RoomMessage.ReviewTimeout(round))
+            }
+
+            reviewing@ for (message in this.channel) {
+                genericMessageHandler(message, players, { reviewState() })
+                when (message) {
+                    is RoomMessage.IncomingConnection -> {
+                        if (round <= quiz.questions.size - 1)
+                            startBuffering(round + 1, quiz.questions[round + 1].song, message.socket)
+                    }
+                    is RoomMessage.BufferComplete -> bufferStatus.computeIfAbsent(message.session.id) { HashSet() }.add(message.round)
+                    is RoomMessage.ClosedConnection -> bufferStatus.remove(message.session.id) // TODO: Errorprone, fix this.
+                    is RoomMessage.ReviewTimeout -> break@reviewing
+                    is RoomMessage.NextRound -> break@reviewing
+                }
+            }
+
+            reviewTimeout.cancel()
         }
 
-        // Notify players that we are in the final state.
-        broadcast(
-            ServerCommand.RoomStat(
-                RoomStatus(
-                    state = RoomState.FINISHED,
-                    round = null,
-                    players = connectedPlayers.keys.map {
-                        PlayerStatus(it.id, server.playerName(it) ?: it.id, true)
-                    }
-                )
-            )
-        )
+        return scores
+    }
 
-        // Finally, transition to the FINAL state, where we just sit here and do nothing.
-        final@ for (message in this.channel) {
-            genericMessageHandler(message, players)
+    /** Start buffering the given songfile by sending it to all connected clients. */
+    private suspend fun startBuffering(round: Int, songFile: URL) {
+        scope.launch {
+            val songData = songFile.readBytes()
+
+            for ((player, socket) in connectedPlayers) {
+                socket.sendOrClose(
+                    ServerCommand.SongData(round, songData.size),
+                    CloseReason(CloseReason.Codes.PROTOCOL_ERROR, "Failed to send song data")
+                )
+                socket.send(songData)
+            }
+        }
+    }
+
+    /** Start buffering a song for a single client. */
+    private suspend fun startBuffering(round: Int, songFile: URL, socket: WebSocketServerSession) {
+        scope.launch {
+            val songData = songFile.readBytes()
+
+            socket.sendOrClose(
+                ServerCommand.SongData(round, songData.size),
+                CloseReason(CloseReason.Codes.PROTOCOL_ERROR, "Failed to send song data")
+            )
+            socket.send(songData)
+        }
+    }
+
+    private suspend fun ActorScope<RoomMessage>.finished(quiz: Quiz, score: Map<String, Int>, players: Set<PlayerSession>) {
+        fun state() = RoomStatus.Finished(score, connectedPlayerInfo())
+
+        broadcast(ServerCommand.RoomStat(state()))
+
+        outer@ for (message in this.channel) {
+            genericMessageHandler(message, players, { state() })
 
             when (message) {
-                is RoomMessage.IncomingConnection ->
-                    try {
-                        // TODO: Cleanup this as a generic 'sendState' method.
-                        message.socket.send(
-                            ServerCommand.RoomStat(
-                                RoomStatus(
-                                    state = RoomState.FINISHED,
-                                    round = null,
-                                    players = connectedPlayers.keys.map {
-                                        PlayerStatus(it.id, server.playerName(it) ?: it.id, true)
-                                    }
-                                )
-                            )
-                        )
-                    } catch (ex: Exception) {
-                    }
-                is RoomMessage.ClosedConnection -> if (connectedPlayers.size == 0) break@final
+                is RoomMessage.ClosedConnection -> if (connectedPlayers.size == 0) break@outer
             }
         }
-
-        // good game! why not play another?
     }
 
     /** Utility method called by the main actor to handle generic messages, like joins/leaves. */
     private suspend fun genericMessageHandler(
         message: RoomMessage,
         players: Set<PlayerSession>,
+        stateFunc: () -> RoomStatus,
         newJoinsAllowed: Boolean = false
     ) {
         when (message) {
@@ -432,45 +374,59 @@ class Room(val id: String, private val server: Amadeus) {
 
                 // Send this player the room configuration; each room state will send any further config information,
                 // like the particular room state.
-                try {
-                    message.socket.send(ServerCommand.RoomConfig(config))
-                } catch (ex: Exception) {
-                    message.socket.close(
-                        CloseReason(
-                            CloseReason.Codes.PROTOCOL_ERROR,
-                            "Failed to initialize client state"
-                        )
-                    )
-                    return
-                }
+                message.socket.sendOrClose(ServerCommand.RoomConfig(config), CloseReason(CloseReason.Codes.PROTOCOL_ERROR, "Failed to initialize client state"))
+                message.socket.sendFallibly(ServerCommand.RoomStat(stateFunc()))
 
                 // Notify other users that this user has joined.
                 val playerStatus =
-                    PlayerStatus(message.session.id, server.playerName(message.session) ?: message.session.id, true)
+                    PlayerInfo(message.session.id, server.playerName(message.session) ?: "player-${message.session.id}", true)
                 broadcast(ServerCommand.PlayerJoined(playerStatus), exclude = message.session)
             }
             is RoomMessage.ClosedConnection -> {
                 // If this was a genuine disconnect (and not a relog), then notify clients that a player has left.
                 if (connectedPlayers.remove(message.session, message.socket)) {
-                    broadcast(ServerCommand.PlayerLeft(message.session.id), exclude = message.session)
+                    broadcast(ServerCommand.PlayerLeft(message.session.id))
                 }
             }
         }
     }
 
-    // TODO: Make this better.
-    /** Check if the given answer is close enough to the correct answer. */
-    private fun isAnswerCloseEnough(correct: String, given: String) = correct.equals(given, ignoreCase = true)
+    /** Run an action once after the given timeout; returns a cancellable channel. */
+    private suspend fun timeout(timeMs: Long, action: suspend () -> Unit): ReceiveChannel<Unit> {
+        val ticker = ticker(timeMs, timeMs, scope.coroutineContext)
+        scope.launch {
+            // If the ticker is cancelled we want to silently go away.
+            try { ticker.receive() } catch (ex: Exception) { return@launch }
+            action()
+            ticker.cancel()
+        }
+
+        return ticker
+    }
+
+    /** Get the list of player information for all connected players. */
+    private fun connectedPlayerInfo(): List<PlayerInfo> = connectedPlayers.keys.map { PlayerInfo(it.id, server.playerName(it) ?: "player-${it.id}", true) }
 
     /** Broadcast a message to all connected clients, potentially excluding a single player. */
     private suspend fun broadcast(command: ServerCommand, exclude: PlayerSession? = null) {
         for ((player, socket) in connectedPlayers) {
             if (player == exclude) continue
-            try {
-                socket.send(command)
-            } catch (ex: Exception) {
-                log.error("Error during broadcast: ", ex)
-            }
+            socket.sendFallibly(command)
+        }
+    }
+
+    // TODO: This will be a noisy log, silence it during deployment and have an alternative mechanism for recording failure.
+    /** Attempt to send a message, doing nothing on a failed message send. */
+    private suspend fun WebSocketServerSession.sendFallibly(command: ServerCommand) {
+        try { this.send(command) } catch (ex: Exception) { log.error("Error when sending message: ", ex) }
+    }
+
+    /** Attempt to send a message, closing the socket on a failed send. */
+    private suspend fun WebSocketServerSession.sendOrClose(command: ServerCommand, close: CloseReason) {
+        try {
+            this.send(command)
+        } catch (ex: Exception) {
+            this.close(close)
         }
     }
 
@@ -478,6 +434,10 @@ class Room(val id: String, private val server: Amadeus) {
     private suspend fun WebSocketServerSession.send(command: ServerCommand) {
         this.send(json.stringify(ServerCommand.serializer(), command))
     }
+
+    // TODO: Make this better.
+    /** Check if the given answer is close enough to the correct answer. */
+    private fun isAnswerCloseEnough(correct: String, given: String) = correct.equals(given, ignoreCase = true)
 }
 
 // /////////////////////////////////////////////////////////////////////////////////////
@@ -497,15 +457,17 @@ data class RoomConfiguration(
     val playTime: Int = 20,
     /** The number of seconds allowed for guessing. */
     val guessTime: Int = 10,
+    /** The number of seconds given to review correct answers. */
+    val reviewTime: Int = 5,
     /** The number of rounds to play. */
     val rounds: Int = 20,
     /** The maximum number of players allowed to join the room. */
     val maxPlayers: Int = 8
 )
 
-/** The current status of a player in the game; just gives basic name and host information, as well as score. */
+/** A player in the game; just gives basic name and host information, as well as score. */
 @Serializable
-data class PlayerStatus(
+data class PlayerInfo(
     /** The id of the player. */
     val id: String,
     /** The name of the player. */
@@ -514,45 +476,46 @@ data class PlayerStatus(
     val host: Boolean
 )
 
-// TODO: I used a Unix epoch because I'm too lazy to figure out how to use ZonedDateTimes. Fix this so we avoid crashing in 2038 :(
-/**
- * The current status of a round in the game; gives the round start time (as a Unix timestamp), the prompt being asked,
- * as well as the guessing status of any players.
- */
-@Serializable
-data class RoundStatus(
-    /** The current round. */
-    val round: Int,
-    /** When the current round started. */
-    val roundStart: Long,
-    /** The prompt for the current round. */
-    val prompt: String,
-    /** The player guesses in the current round. */
-    val guessed: Set<String>,
-    /** The player's points in the current round. */
-    val points: Map<String, Int>
-)
-
-/**
- * The different possible states that the room can be in; the room will generally linearly transition from one state
- * to the next one (though it may go from 'Finished' back to 'Lobby', and it swaps between 'Ingame' and 'Ingame Buffering').
- */
-@Serializable
-enum class RoomState { LOBBY, LOADING, INGAME, INGAME_BUFFERING, FINISHED }
-
+// TODO: For simplicity, players is duplicated across all room states and made available through a function;
+//
 /**
  * A snapshot of the current status of the room - what state/phase it is in (such as 'Lobby' or '4th round in game'),
  * how many players are currently
  */
 @Serializable
-data class RoomStatus(
-    /** The current state of the room. */
-    val state: RoomState = RoomState.LOBBY,
-    /** The current round. */
-    val round: RoundStatus? = null,
-    /** The list of players in the room. */
-    val players: List<PlayerStatus> = listOf()
-)
+sealed class RoomStatus {
+    abstract val players: List<PlayerInfo>
+
+    /** The initial state, during which players can freely leave and join. */
+    @Serializable
+    @SerialName("LOBBY")
+    data class Lobby(override val players: List<PlayerInfo>) : RoomStatus()
+
+    /** The loading state, where players wait for the quiz to start. */
+    @Serializable
+    @SerialName("LOADING")
+    data class Loading(override val players: List<PlayerInfo>) : RoomStatus()
+
+    /** Buffering in a round (waiting for players to catch up). */
+    @Serializable
+    @SerialName("BUFFERING")
+    data class Buffering(val round: Int, val ready: Set<String>, val scores: Map<String, Int>, override val players: List<PlayerInfo>) : RoomStatus()
+
+    /** Currently playing a round. */
+    @Serializable
+    @SerialName("PLAYING")
+    data class Playing(val round: Int, val startTime: Long, val prompt: String, val guessed: Set<String>, val scores: Map<String, Int>, override val players: List<PlayerInfo>) : RoomStatus()
+
+    /** Players are reviewing the answers to a played round. */
+    @Serializable
+    @SerialName("REVIEWING")
+    data class Reviewing(val round: Int, val prompt: String, val solution: String, val guesses: Map<String, String>, val scores: Map<String, Int>, override val players: List<PlayerInfo>) : RoomStatus()
+
+    /** The game has finished, and the scoreboard is being shown. */
+    @Serializable
+    @SerialName("FINISHED")
+    data class Finished(val scores: Map<String, Int>, override val players: List<PlayerInfo>) : RoomStatus()
+}
 
 // ///////////////////////////////////////////////////////
 // Websocket protocol interchange format (JSON-based). //
@@ -586,7 +549,7 @@ sealed class ServerCommand {
 
     @Serializable
     @SerialName("PLAYER_JOINED")
-    data class PlayerJoined(val player: PlayerStatus) : ServerCommand()
+    data class PlayerJoined(val player: PlayerInfo) : ServerCommand()
 
     @Serializable
     @SerialName("ROOM_CONFIG")
@@ -632,6 +595,12 @@ sealed class RoomMessage {
 
     /** The round timer has been reached, so it should be ended forcibly. */
     data class RoundTimeout(
+        /** The round which has been timed out. */
+        val round: Int
+    ) : RoomMessage()
+
+    /** The review window timeout has been reached, so it should be ended. */
+    data class ReviewTimeout(
         /** The round which has been timed out. */
         val round: Int
     ) : RoomMessage()

@@ -129,6 +129,12 @@ compileKotlin {
     }
 }
 
+kotlinter {
+    ignoreFailures = false
+    indentSize = 4
+    disabledRules = ["no-wildcard-imports"]
+}
+
 /** Cleanup automation (for deleting runtime files). */
 task cleanRuntimeFiles(type: Delete) {
     delete 'work'
@@ -138,17 +144,3 @@ task cleanRuntimeFiles(type: Delete) {
 }
 
 clean.dependsOn(cleanRuntimeFiles)
-
-/** Frontend build automation. */
-
-node {
-    nodeModulesDir = file("${project.projectDir}/frontend")
-}
-
-task copyCss(type: Copy) {
-    from "$projectDir/frontend/dist/main.css"
-    into "$buildDir/resources/main/static"
-}
-copyCss.dependsOn npm_run_build
-build.dependsOn copyCss
-compileKotlin.dependsOn formatKotlin

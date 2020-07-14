@@ -34,7 +34,6 @@ socket.addEventListener("message", function(event) {
             source.connect(audioContext.destination)
             audioBuffers[expectedAudioRound] = source
             bufferComplete(expectedAudioRound)
-            console.log("Received audio for round " + expectedAudioRound)
         }, function(error) {
             console.log(error)
         })
@@ -47,13 +46,13 @@ socket.addEventListener("error", function(event) {
 
 // Diffs the old and new states, executing any changes in the UI that are necessary.
 function diffState(oldState, newState) {
-    if (oldState.state == "INGAME" && newState.state == "INGAME_BUFFERING") {
-        console.log("Ending round " + oldState.round.round)
-        audioBuffers[oldState.round.round].stop()
-    } else if (oldState.state == "INGAME_BUFFERING" && newState.state == "INGAME") {
-        console.log("Starting round " + newState.round.round)
-        console.log("Prompt: " + newState.round.prompt)
-        audioBuffers[newState.round.round].start()
+    if (oldState.type == "PLAYING" && newState.type == "REVIEWING") {
+        console.log("Ending round " + oldState.round)
+        audioBuffers[oldState.round].stop()
+    } else if (oldState.type == "BUFFERING" && newState.type == "PLAYING") {
+        console.log("Starting round " + newState.round)
+        console.log("Prompt: " + newState.prompt)
+        audioBuffers[newState.round].start()
     }
 }
 
@@ -75,7 +74,7 @@ function next() {
 }
 
 function guess(theGuess) {
-    socket.send(JSON.stringify({ type: "GUESS", round: state.round.round, guess: theGuess }))
+    socket.send(JSON.stringify({ type: "GUESS", round: state.round, guess: theGuess }))
 }
 
 function bufferComplete(round) {
