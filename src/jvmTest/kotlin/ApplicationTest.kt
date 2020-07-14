@@ -1,5 +1,6 @@
-package io.meltec.amadeus
-
+import io.meltec.amadeus.Amadeus
+import io.meltec.amadeus.Database
+import io.meltec.amadeus.YoutubeDownloader
 import org.junit.Test
 import org.sqlite.SQLiteConfig
 import kotlin.test.assertEquals
