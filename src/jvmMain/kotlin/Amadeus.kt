@@ -1,52 +1,25 @@
 package io.meltec.amadeus
 
-import io.ktor.application.Application
-import io.ktor.application.ApplicationCall
-import io.ktor.application.ApplicationCallPipeline
-import io.ktor.application.call
-import io.ktor.application.install
-import io.ktor.features.AutoHeadResponse
-import io.ktor.features.CORS
-import io.ktor.features.CachingHeaders
-import io.ktor.features.CallLogging
-import io.ktor.features.Compression
-import io.ktor.features.ContentNegotiation
-import io.ktor.features.DataConversion
-import io.ktor.features.HttpsRedirect
-import io.ktor.features.StatusPages
-import io.ktor.features.deflate
-import io.ktor.features.gzip
-import io.ktor.features.minimumSize
+import io.ktor.application.*
+import io.ktor.features.*
 import io.ktor.html.respondHtmlTemplate
-import io.ktor.http.CacheControl
-import io.ktor.http.ContentType
-import io.ktor.http.HttpHeaders
-import io.ktor.http.HttpMethod
-import io.ktor.http.HttpStatusCode
+import io.ktor.http.*
 import io.ktor.http.cio.websocket.CloseReason
 import io.ktor.http.cio.websocket.close
 import io.ktor.http.cio.websocket.pingPeriod
 import io.ktor.http.cio.websocket.timeout
 import io.ktor.http.content.CachingOptions
+import io.ktor.http.content.resolveResource
 import io.ktor.http.content.resources
 import io.ktor.http.content.static
-import io.ktor.locations.KtorExperimentalLocationsAPI
-import io.ktor.locations.Location
-import io.ktor.locations.Locations
-import io.ktor.locations.get
-import io.ktor.locations.href
-import io.ktor.locations.post
+import io.ktor.locations.*
 import io.ktor.request.path
 import io.ktor.request.receiveParameters
 import io.ktor.response.respond
 import io.ktor.response.respondRedirect
 import io.ktor.routing.routing
 import io.ktor.serialization.json
-import io.ktor.sessions.Sessions
-import io.ktor.sessions.cookie
-import io.ktor.sessions.get
-import io.ktor.sessions.getOrSet
-import io.ktor.sessions.sessions
+import io.ktor.sessions.*
 import io.ktor.util.KtorExperimentalAPI
 import io.ktor.util.date.GMTDate
 import io.ktor.util.generateNonce
@@ -54,7 +27,6 @@ import io.ktor.util.pipeline.PipelineContext
 import io.ktor.websocket.WebSockets
 import io.meltec.amadeus.templates.DefaultTemplate
 import io.meltec.amadeus.templates.registrationPage
-import io.meltec.amadeus.templates.roomPage
 import io.meltec.amadeus.templates.roomsPage
 import io.meltec.amadeus.templates.youtubeStatusPage
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -244,9 +216,8 @@ class Amadeus(private val database: Database, private val downloader: YoutubeDow
                 rooms.computeIfAbsent(id) { Room(it, this@Amadeus) }
 
                 // Join a specific room, this page will create a WebSocket for game communication
-                call.respondHtmlTemplate(DefaultTemplate()) {
-                    roomPage(id)
-                }
+                val content = call.resolveResource("templates/game.html") ?: throw IllegalStateException("Could not find game template")
+                call.respond(content)
             }
 
             webSocket<Root.Rooms.Room> { (id) ->

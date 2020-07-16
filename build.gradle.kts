@@ -93,7 +93,6 @@ kotlin {
                 implementation(npm("abort-controller", "latest"))
 
                 implementation("io.ktor:ktor-client-js:$ktorVersion") //include http&websockets
-                //todo: bugfix in ktor-client?
                 implementation(npm("bufferutil", "latest")) //TODO: Uncomment this and stuff breaks. WHY?
                 implementation(npm("utf-8-validate", "latest"))
 
@@ -101,6 +100,9 @@ kotlin {
                 implementation("io.ktor:ktor-client-json-js:$ktorVersion")
                 implementation("io.ktor:ktor-client-serialization-js:$ktorVersion")
                 implementation(npm("fs", "latest"))
+
+                // kotlin clientside HTML generation.
+                implementation("org.jetbrains.kotlinx:kotlinx-html-js:0.7.1-1.4-M3")
             }
         }
     }

@@ -1,5 +1,6 @@
 package io.meltec.amadeus
 
+import ClientCommand
 import PlayerInfo
 import RoomConfiguration
 import RoomStatus
@@ -112,12 +113,10 @@ class Room(val id: String, private val server: Amadeus) {
             }
         } catch (ex: Exception) {
             // On any error which causes this socket to close, let the server know.
-            controller.send(RoomMessage.ClosedConnection(session, socket))
-
             log.error("Error during operation of websocket for user '${session.id}':", ex)
         }
 
-        // TODO: Is it possible to reach here without having sent the closed connection message? Hmm.
+        controller.send(RoomMessage.ClosedConnection(session, socket))
     }
 
     // Private state of the room which is only visible to the controller.
@@ -259,14 +258,17 @@ class Room(val id: String, private val server: Amadeus) {
             playTimeout.cancel()
 
             // Give points to players who scored.
+            val correctPlayers: MutableSet<String> = mutableSetOf()
             for ((playerId, guess) in guesses) {
-                if (isAnswerCloseEnough(question.solution, guess))
+                if (isAnswerCloseEnough(question.solution, guess)) {
+                    correctPlayers.add(playerId)
                     scores.compute(playerId) { _, score -> (score ?: 0) + 1 }
+                }
             }
 
             // REVIEW
             // Transition to the review state for a fixed amount of time.
-            fun reviewState() = RoomStatus.Reviewing(round, question.prompt, question.solution, guesses, scores, connectedPlayerInfo())
+            fun reviewState() = RoomStatus.Reviewing(round, question.prompt, question.solution, guesses, correctPlayers, scores, connectedPlayerInfo())
             broadcast(ServerCommand.RoomStat(reviewState()))
 
             val reviewTimeout = timeout(config.reviewTime * 1000L) {
@@ -380,18 +382,12 @@ class Room(val id: String, private val server: Amadeus) {
                 message.socket.sendFallibly(ServerCommand.RoomStat(stateFunc()))
 
                 // Notify other users that this user has joined.
-                val playerStatus =
-                    PlayerInfo(
-                        message.session.id,
-                        server.playerName(message.session) ?: "player-${message.session.id}",
-                        true
-                    )
-                broadcast(ServerCommand.PlayerJoined(playerStatus), exclude = message.session)
+                broadcast(ServerCommand.RoomStat(stateFunc()), exclude = message.session)
             }
             is RoomMessage.ClosedConnection -> {
                 // If this was a genuine disconnect (and not a relog), then notify clients that a player has left.
                 if (connectedPlayers.remove(message.session, message.socket)) {
-                    broadcast(ServerCommand.PlayerLeft(message.session.id))
+                    broadcast(ServerCommand.RoomStat(stateFunc()))
                 }
             }
         }

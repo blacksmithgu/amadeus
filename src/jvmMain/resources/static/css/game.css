@@ -1,0 +1,26 @@
+/* CSS used by the main game page (see templates/Pages.kt), or mockups/game.html */
+
+.sidebar {
+    position: fixed;
+    top: 48px;
+    bottom: 0;
+    left: 0;
+    z-index: 100;
+}
+
+.sidebar-sticky {
+    position: relative;
+    top: 0;
+    height: calc(100vh - 48px);
+    padding-top: .5rem;
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+
+.guess {
+    min-width: 160px;
+    text-align: center;
+    font-size: 20px;
+    font-weight: bold;
+}
+
