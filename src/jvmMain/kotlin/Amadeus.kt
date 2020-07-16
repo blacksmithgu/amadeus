@@ -169,7 +169,7 @@ class Amadeus(private val database: Database, private val downloader: YoutubeDow
 
         // Create a session in each request if no session exists
         intercept(ApplicationCallPipeline.Features) {
-            call.sessions.getOrSet { PlayerSession(generateNonce()) }
+            call.sessions.getOrSet<PlayerSession> { PlayerSession(generateNonce()) }
         }
 
         // Main routing table.
